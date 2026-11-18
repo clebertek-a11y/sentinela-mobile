@@ -1,8 +1,8 @@
 {
   "applicationId": "br.gov.rs.sapucaiadosul.sentinela.atualizavel",
-  "versionCode": 0,
-  "versionName": "0.0.0",
-  "apkUrl": "",
-  "notes": "Nenhuma versão atualizável publicada ainda.",
+  "versionCode": 10,
+  "versionName": "0.4.0",
+  "apkUrl": "https://github.com/clebertek-a11y/sentinela-mobile/releases/download/v0.4.0-atualizavel/SENTINELA-Mobile-0.4.0-ATUALIZAVEL.apk",
+  "notes": "Canal atualizavel do SENTINELA: verificacao automatica de novas versoes ao abrir e consulta manual em Configuracoes.",
   "required": false
 }
