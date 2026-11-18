@@ -1,4 +1,4 @@
-name: Publicar link direto do APK de teste
+name: Publicar APK SENTINELA 0.2 (somente testes)
 
 on:
   workflow_dispatch:
@@ -14,24 +14,24 @@ jobs:
   publicar:
     runs-on: ubuntu-latest
     steps:
-      - name: Baixar o APK da compilacao validada
+      - name: Baixar APK validado no GitHub Actions
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           mkdir -p release
-          gh run download 44213113882 --repo "$GH_REPO" --name SENTINELA-Mobile-APK-Teste --dir release
+          gh run download 44217792323 --repo "$GH_REPO" --name SENTINELA-Mobile-APK-Teste --dir release
           test -s release/app-debug.apk
-          mv release/app-debug.apk release/SENTINELA-Mobile-0.1-TESTE.apk
-          sha256sum release/SENTINELA-Mobile-0.1-TESTE.apk
+          mv release/app-debug.apk release/SENTINELA-Mobile-0.2-TESTE.apk
+          sha256sum release/SENTINELA-Mobile-0.2-TESTE.apk
 
-      - name: Disponibilizar instalador como link direto
+      - name: Publicar link direto (sem ZIP)
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          if gh release view v0.1.0-teste --repo "$GH_REPO" >/dev/null 2>&1; then
-            gh release upload v0.1.0-teste release/SENTINELA-Mobile-0.1-TESTE.apk --repo "$GH_REPO" --clobber
+          if gh release view v0.2.0-teste --repo "$GH_REPO" >/dev/null 2>&1; then
+            gh release upload v0.2.0-teste release/SENTINELA-Mobile-0.2-TESTE.apk --repo "$GH_REPO" --clobber
           else
-            gh release create v0.1.0-teste release/SENTINELA-Mobile-0.1-TESTE.apk --repo "$GH_REPO" --title "SENTINELA Mobile 0.1 - somente testes" --notes "VERSAO EXPERIMENTAL: nao utilizar em atendimentos reais. App Android independente, assinado com chave de depuracao. Instalar somente em aparelhos autorizados. Nao utilizar dados pessoais ou senhas reais nesta fase." --prerelease
+            gh release create v0.2.0-teste release/SENTINELA-Mobile-0.2-TESTE.apk --repo "$GH_REPO" --title "SENTINELA Mobile 0.2 - somente testes" --notes "Versão de testes, NÃO usar com dados de ocorrências reais. Senha mínima 8 caracteres com maiúscula, minúscula, número e símbolo. Opção de conta DEMO 9999 / Boco@123. Mostrar e confirmar senha, layout rolável com teclado e verificação de atualizações pelo GitHub. ATENÇÃO: APK de depuração com chave gerada no servidor; a substituição da versão 0.1 pode falhar por incompatibilidade de assinatura. Não desinstale a versão anterior antes de exportar todos os documentos. Não usar os logins DEMO em produção." --prerelease
           fi
