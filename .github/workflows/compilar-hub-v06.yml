@@ -76,3 +76,5 @@ jobs:
         with:
           name: SENTINELA-HUB-0.6.0-ATUALIZACAO-ASSINADA
           path: SENTINELA-HUB-0.6.0-ATUALIZACAO-ASSINADA.apk
+
+# Build revisado: preservar campos locais e exibir icone na interface.
