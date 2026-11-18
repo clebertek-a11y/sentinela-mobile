@@ -27,11 +27,15 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Preparar Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Conferir Android SDK do servidor
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          test -d "$ANDROID_HOME"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --version
 
       - name: Instalar Android API 35
-        run: sdkmanager --install "platforms;android-35" "build-tools;35.0.0"
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" --install "platforms;android-35" "build-tools;35.0.0"
 
       - name: Extrair codigo-fonte do SENTINELA
         run: unzip -o -q sentinela_source_payload.zip -d .
