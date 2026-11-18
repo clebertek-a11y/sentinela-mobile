@@ -348,6 +348,11 @@ class MainActivity : Activity() {
     private fun showLogin() {
         currentUser = null
         val body = screen("Acesso operacional", "SIGOPE e Boletim de Atendimento em um único aplicativo")
+        body.addView(ImageView(this).apply {
+            setImageResource(R.drawable.sentinela_app_icon)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            contentDescription = "Sentinela COMPDEC"
+        }, LinearLayout.LayoutParams(-1, sp(112)).apply { bottomMargin = sp(10) })
         val c = section(body, "Identificação")
         val mat = field(c, "Matrícula")
         val pass = field(c, "Senha", password = true)
@@ -473,7 +478,7 @@ class MainActivity : Activity() {
         }
         val brand=row()
         brand.addView(ImageView(this).apply {
-            setImageResource(R.drawable.sentinela_logo)
+            setImageResource(R.drawable.sentinela_app_icon)
             scaleType=ImageView.ScaleType.CENTER_CROP
             background=darkShape(Color.rgb(2,19,40),10,Color.rgb(0,112,206))
         }, LinearLayout.LayoutParams(sp(56),sp(56)).apply {rightMargin=sp(9)})
