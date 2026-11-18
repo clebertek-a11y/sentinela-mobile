@@ -57,6 +57,7 @@ class MainActivity : Activity() {
         store = LocalStore(this)
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         if (store.hasUsers()) showLogin() else showBootstrap()
+        if (!prefs.getString("url","").isNullOrBlank()) { SyncJobService.periodic(this); SyncJobService.schedule(this) }
         checkForUpdates(false)
     }
 
@@ -513,7 +514,8 @@ class MainActivity : Activity() {
         module.addView(darkLabel("SIGOPE",22f,true,orange))
         module.addView(darkLabel("  |  Gestão de Ocorrências",14f,true),LinearLayout.LayoutParams(0,-2,1f))
         area.addView(module)
-        area.addView(darkLabel("Registros deste aparelho • Todos os usuários autenticados podem consultar",11f,false,Color.rgb(175,196,219)))
+        area.addView(darkLabel("Ocorrências locais e recebidas pelo HUB • Sincronização sob autenticação",11f,false,Color.rgb(175,196,219)))
+        area.addView(darkLabel("HUB: " + (prefs.getString("hub_last_status","Não testado") ?: "Não testado"),11f,false,Color.rgb(167,192,223)))
         val cases=store.incidents()
         val pending=cases.count { it.status=="Aguardando atendimento" }
         val progress=cases.count { it.status!="Aguardando atendimento" && it.status!="Atendida" }
@@ -532,6 +534,7 @@ class MainActivity : Activity() {
 
         val quicks=mutableListOf<Pair<String,()->Unit>>()
         if(has(Rights.CREATE)) quicks.add("+ Registrar ocorrência" to {newIncident()})
+        quicks.add("↻ Sincronizar agora" to { SyncJobService.now(this) { message -> toast(message); dashboard() } })
         if(has(Rights.REPORTS)) quicks.add("▥ Relatórios" to {reportsScreen()})
         if(has(Rights.USERS)) quicks.add("♙ Gestão de usuários" to {userManagement()})
         if(has(Rights.SETTINGS)) quicks.add("⚙ Configurações" to {settings()})
@@ -647,7 +650,7 @@ class MainActivity : Activity() {
             .setMessage("Seu nome e matrícula serão registrados no histórico. A equipe originalmente designada será preservada. Depois de aceitar, você poderá iniciar o deslocamento e o atendimento conforme suas permissões.")
             .setNegativeButton("Cancelar",null)
             .setPositiveButton("Aceitar") {_,_->
-                try {store.acceptIncident(id,currentUser!!.id);toast("Atendimento aceito");openIncident(id)}
+                try {store.acceptIncident(id,currentUser!!.id);SyncJobService.schedule(this);toast("Atendimento aceito");openIncident(id)}
                 catch(e:Exception){toast(e.message?:"Não foi possível aceitar")}
             }.show()
     }
@@ -677,6 +680,7 @@ class MainActivity : Activity() {
                     telefone.text.toString(),rua.text.toString(),bairro.text.toString(),
                     tipo.text.toString(),descricao.text.toString(),equipe.text.toString(),
                     prioridade.selectedItem.toString(), currentUser!!.id)
+                SyncJobService.schedule(this)
                 toast("Ocorrência ${item.number} criada offline"); openIncident(item.id)
             } catch (e: Exception) { toast(e.message ?: "Erro ao registrar") }
         })
@@ -698,15 +702,15 @@ class MainActivity : Activity() {
         if(o.status!="Atendida" && !mine && has(Rights.ACCEPT)) stage.addView(button("Aceitar atendimento") {confirmAccept(id)})
         if(o.status!="Atendida" && (mine || u.role=="ADMIN")) {
             if(o.status=="Aguardando atendimento" && has(Rights.STATUS)) stage.addView(button("A caminho") {
-                try {store.updateStatus(id,"Equipe deslocada",u.id);openIncident(id)} catch(e:Exception){toast(e.message?:"Falha ao mudar status")}
+                try {store.updateStatus(id,"Equipe deslocada",u.id);SyncJobService.schedule(this);openIncident(id)} catch(e:Exception){toast(e.message?:"Falha ao mudar status")}
             })
             if(o.status in setOf("Equipe deslocada","Aguardando apoio","Aguardando retorno") && has(Rights.STATUS)) stage.addView(button("Iniciar atendimento → Abrir BA") {
-                try {store.updateStatus(id,"Em atendimento",u.id);reportScreen(id)} catch(e:Exception){toast(e.message?:"Falha ao iniciar")}
+                try {store.updateStatus(id,"Em atendimento",u.id);SyncJobService.schedule(this);reportScreen(id)} catch(e:Exception){toast(e.message?:"Falha ao iniciar")}
             })
             if(o.status=="Em atendimento" && has(Rights.BA)) stage.addView(button("Continuar Boletim de Atendimento") {reportScreen(id)})
             if(o.status in setOf("Equipe deslocada","Em atendimento") && has(Rights.STATUS)) {
-                stage.addView(button("Aguardando apoio",false){try{store.updateStatus(id,"Aguardando apoio",u.id);openIncident(id)}catch(e:Exception){toast(e.message?:"Falha")}})
-                stage.addView(button("Aguardando retorno",false){try{store.updateStatus(id,"Aguardando retorno",u.id);openIncident(id)}catch(e:Exception){toast(e.message?:"Falha")}})
+                stage.addView(button("Aguardando apoio",false){try{store.updateStatus(id,"Aguardando apoio",u.id);SyncJobService.schedule(this);openIncident(id)}catch(e:Exception){toast(e.message?:"Falha")}})
+                stage.addView(button("Aguardando retorno",false){try{store.updateStatus(id,"Aguardando retorno",u.id);SyncJobService.schedule(this);openIncident(id)}catch(e:Exception){toast(e.message?:"Falha")}})
             }
         } else if(o.status!="Atendida") stage.addView(label("Para executar este atendimento, aceite a ocorrência e utilize as permissões concedidas pelo administrador.",13f))
         val docs=section(body,"Boletim, fotos e arquivamento")
@@ -815,7 +819,7 @@ class MainActivity : Activity() {
         } else actions.addView(label("Atendimento concluído. As alterações e novas assinaturas estão bloqueadas nesta versão.", 12f))
     }
 
-    private fun saveDraft(r: Report) { store.saveReport(r, currentUser!!.id) }
+    private fun saveDraft(r: Report) { store.saveReport(r, currentUser!!.id); SyncJobService.schedule(this) }
 
     private fun collectSignature(title: String, target: File, onSaved: (String)->Unit) {
         val holder = vertical().apply {setPadding(sp(12),sp(12),sp(12),sp(12))}
@@ -1015,18 +1019,23 @@ class MainActivity : Activity() {
         updates.addView(label("Versão instalada: ${UpdateChecker.installedVersion(this)}", 13f, true))
         updates.addView(button("Verificar atualizações",false) {checkForUpdates(true)})
         updates.addView(label("A instalação de APK exige sua autorização. A atualização preserva dados apenas com assinatura digital compatível. Para os testes iniciais, exporte os boletins antes de reinstalar.",12f))
-        val c = section(body,"Servidor independente")
-        c.addView(label("Para enviar dados automaticamente, é necessário um serviço HTTPS independente acessível pelo aparelho. Não apontar diretamente para \\servidor02\\Comp.",13f))
-        val url = field(c,"URL HTTPS de sincronização", "https://servidor.exemplo.br/api/v1/atendimentos/arquivo", prefs.getString("url","")?:"")
-        val token = field(c,"Token de autenticação do dispositivo",value=SecureSecrets.read(this),password=true)
+        val c = section(body,"Conexão com Sentinela HUB")
+        c.addView(label("O HUB precisa estar instalado e acessível por HTTPS com certificado confiável. Use uma conta de operador criada no HUB. Não utilize caminho de pasta SMB nem HTTP.",13f))
+        val url = field(c,"Endereço HTTPS do HUB", "https://hub.exemplo.br", prefs.getString("url","")?:"")
+        val username = field(c,"Usuário do HUB", "Conta operador",prefs.getString("hub_user","")?:"")
+        val secret = field(c,"Senha do HUB (deixe vazio para manter a anterior)",password=true)
         c.addView(button("Salvar configuração") {
             val address = url.text.toString().trim()
-            if(address.isNotBlank() && !address.startsWith("https://")) return@button toast("Use exclusivamente HTTPS")
-            prefs.edit().putString("url",address).apply()
-            SecureSecrets.save(this,token.text.toString().trim())
+            if(!address.startsWith("https://") || address.contains("@") || runCatching { java.net.URL(address).path.trim('/').isNotBlank() }.getOrDefault(true)) return@button toast("Informe somente a URL raiz HTTPS do HUB")
+            if(username.text.toString().trim().isBlank()) return@button toast("Informe o usuário do HUB")
+            prefs.edit().putString("url",address.trimEnd('/')).putString("hub_user",username.text.toString().trim()).apply()
+            if(secret.text.isNotEmpty()) SecureSecrets.save(this,secret.text.toString())
+            SyncJobService.periodic(this)
             SyncJobService.schedule(this)
-            toast("Configuração salva. Sem servidor disponível, permanecerá pendente.")
+            toast("Configuração salva. Verifique o teste de sincronização.")
         })
+        c.addView(button("Testar conexão e sincronizar",false) { SyncJobService.now(this) { toast(it); settings() } })
+        c.addView(label("Conflitos aparecem com estado CONFLITO; não são sobrescritos automaticamente. Acesso externo exige HTTPS confiável.",12f))
         val warn = section(body,"Segurança e dados locais")
         warn.addView(label("Dados armazenados no espaço privado do aplicativo. Não limpe os dados nem desinstale antes de exportar e confirmar o arquivamento. Senhas possuem hash com salt. O piloto ainda não oferece criptografia de banco ou backup remoto completo.",13f))
         warn.addView(label("O aplicativo não usa o banco SIGOPE ou BA da Lovable.",13f,true))
