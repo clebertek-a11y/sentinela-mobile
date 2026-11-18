@@ -6,8 +6,8 @@
     <application
         android:allowBackup="false"
         android:usesCleartextTraffic="false"
-        android:icon="@drawable/ic_sentinela"
-        android:label="SENTINELA ATUALIZAVEL"
+        android:icon="@drawable/sentinela_app_icon"
+        android:label="SENTINELA COMPDEC"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:localeConfig="@xml/locales_config"
         android:supportsRtl="true">
