@@ -1,0 +1,65 @@
+name: Compilar SENTINELA 0.6 HUB + icone
+on:
+  push:
+    branches: [integracao-hub-android-20261118]
+    paths: ['.github/workflows/compilar-hub-v06.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      SENTINELA_KEYSTORE_BASE64: ${{ secrets.SENTINELA_KEYSTORE_BASE64 }}
+      SENTINELA_KEYSTORE_PASSWORD: ${{ secrets.SENTINELA_KEYSTORE_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Android SDK 35
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" --install "platforms;android-35" "build-tools;35.0.0"
+      - name: Preparar assinatura oficial
+        run: |
+          set -euo pipefail
+          if [ -z "$SENTINELA_KEYSTORE_BASE64" ] || [ -z "$SENTINELA_KEYSTORE_PASSWORD" ]; then
+            echo "::error::Configure SENTINELA_KEYSTORE_BASE64 e SENTINELA_KEYSTORE_PASSWORD."
+            exit 1
+          fi
+          printf '%s' "$SENTINELA_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/sentinela-release.p12"
+          chmod 600 "$RUNNER_TEMP/sentinela-release.p12"
+          keytool -list -storetype PKCS12 -keystore "$RUNNER_TEMP/sentinela-release.p12" -storepass "$SENTINELA_KEYSTORE_PASSWORD" -alias sentinela-mobile >/dev/null
+          echo "SENTINELA_KEYSTORE_PATH=$RUNNER_TEMP/sentinela-release.p12" >> "$GITHUB_ENV"
+      - name: Compilar versao 0.6.0
+        run: gradle --no-daemon --stacktrace :app:assembleRelease
+      - name: Validar assinatura e versao
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/release/app-release.apk
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F "package: name='br.gov.rs.sapucaiadosul.sentinela.atualizavel' versionCode='12' versionName='0.6.0'"
+          cp "$APK" SENTINELA-Mobile-0.6.0-HUB-TESTE.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SENTINELA-Mobile-0.6.0-HUB-APK
+          path: SENTINELA-Mobile-0.6.0-HUB-TESTE.apk
+          if-no-files-found: error
+      - name: Publicar versao de teste sem alterar catalogo estavel
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TAG=v0.6.0-hub-piloto
+          if gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
+            gh release upload "$TAG" SENTINELA-Mobile-0.6.0-HUB-TESTE.apk --repo "$GH_REPO" --clobber
+          else
+            gh release create "$TAG" SENTINELA-Mobile-0.6.0-HUB-TESTE.apk --repo "$GH_REPO" --title "SENTINELA 0.6.0 HUB - teste" --notes "Versao de testes com icone COMPDEC, envio/recebimento de registros e anexos via HUB. Requer HTTPS valido e conta do HUB. Nao usar com dados reais antes de homologar." --prerelease
+          fi
