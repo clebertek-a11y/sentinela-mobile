@@ -162,34 +162,56 @@ class HubSyncEngine(private val context: Context) {
     }
 
     private fun importRecord(id: String, data: JSONObject, exists: Boolean) {
-        fun get(key: String, fallback: String = "") = data.optString(key,fallback)
+        // Pacotes parciais do servidor nao podem apagar campos ja presentes no aparelho.
+        val previous = if (exists) store.incident(id) else null
+        fun get(key: String, fallback: String = "") =
+            if (data.has(key) && !data.isNull(key)) data.optString(key,fallback) else fallback
         val cv = ContentValues().apply {
             if (!exists) put("id",id)
-            put("number",get("numero_sigope",id))
-            put("date",get("data",java.time.LocalDate.now().toString()))
-            put("category",get("categoria","OCORRENCIAS"))
-            put("solicitante",get("solicitante"));put("telefone",get("telefone"))
-            put("rua",get("endereco"));put("bairro",get("bairro"))
-            put("tipo",get("tipo"));put("descricao",get("descricao"))
-            put("equipe",get("equipe"));put("prioridade",get("prioridade","Normal"))
-            put("status",get("status","Aguardando atendimento"))
+            put("number",get("numero_sigope",previous?.number ?: id))
+            put("date",get("data",previous?.date ?: java.time.LocalDate.now().toString()))
+            put("category",get("categoria",previous?.category ?: "OCORRENCIAS"))
+            put("solicitante",get("solicitante",previous?.solicitante ?: ""))
+            put("telefone",get("telefone",previous?.telefone ?: ""))
+            put("rua",get("endereco",previous?.rua ?: ""))
+            put("bairro",get("bairro",previous?.bairro ?: ""))
+            put("tipo",get("tipo",previous?.tipo ?: ""))
+            put("descricao",get("descricao",previous?.descricao ?: ""))
+            put("equipe",get("equipe",previous?.equipe ?: ""))
+            put("prioridade",get("prioridade",previous?.prioridade ?: "Normal"))
+            put("status",get("status",previous?.status ?: "Aguardando atendimento"))
             put("sync_state","SINCRONIZADO")
-            put("updated_at", LocalStore.now())
+            put("updated_at",LocalStore.now())
             if (!exists) put("created_at",LocalStore.now())
         }
         if (exists) {
-            if (db.update("incidents",cv,"id=?",arrayOf(id)) != 1) error("Erro ao atualizar incidencia")
+            if (db.update("incidents",cv,"id=?",arrayOf(id)) != 1) error("Erro ao atualizar ocorrencia")
         } else {
             db.insertOrThrow("incidents",null,cv)
         }
         val report = data.optJSONObject("relatorio")
         if (report != null) {
+            val prior = store.report(id)
             val r = ContentValues().apply {
                 put("incident_id",id)
                 for (key in listOf("historico","providencias","responsavel","responsavel_documento",
                     "agente_matricula","agente_nome","outros_agentes","gps","atualizado_em")) {
-                    put(key,report.optString(key,""))
+                    val fallback = when(key) {
+                        "historico" -> prior.historico
+                        "providencias" -> prior.providencias
+                        "responsavel" -> prior.responsavel
+                        "responsavel_documento" -> prior.responsavelDocumento
+                        "agente_matricula" -> prior.agenteMatricula
+                        "agente_nome" -> prior.agenteNome
+                        "outros_agentes" -> prior.outrosAgentes
+                        "gps" -> prior.gps
+                        else -> prior.atualizadoEm
+                    }
+                    put(key,if(report.has(key)) report.optString(key,fallback) else fallback)
                 }
+                // Referencias a assinaturas sao arquivos locais; nao apaga-las em importacoes.
+                put("agente_signature", prior.agenteSignature)
+                put("responsavel_signature", prior.responsavelSignature)
             }
             db.insertWithOnConflict("reports",null,r,SQLiteDatabase.CONFLICT_REPLACE)
         }
