@@ -235,6 +235,23 @@ class LocalStore(ctx: Context) : SQLiteOpenHelper(ctx, "sentinela_offline.db", n
         return user
     }
 
+    /** Provisiona o cache offline apenas apos autenticacao HTTPS valida no HUB. */
+    fun provisionFromHub(name: String, matricula: String, role: String, password: String): User {
+        require(name.isNotBlank() && matricula.isNotBlank())
+        require(role in setOf("ADMIN","OPERADOR","AGENTE","CONSULTA"))
+        validatePassword(password)
+        val existing = userByMatricula(matricula)
+        if (existing == null) return createUser(name,matricula,role,password)
+        val salt = ByteArray(16).also { SecureRandom().nextBytes(it) }
+        val salt64 = android.util.Base64.encodeToString(salt,android.util.Base64.NO_WRAP)
+        val cv = ContentValues().apply {
+            put("name",name.trim());put("role",role);put("active",1);put("deleted",0)
+            put("salt",salt64);put("pw_hash",derivePassword(password,salt))
+        }
+        writableDatabase.update("users",cv,"matricula=?", arrayOf(matricula.trim()))
+        return login(matricula,password) ?: error("Falha ao provisionar credencial local")
+    }
+
     fun login(matricula: String, password: String): User? {
         return readableDatabase.rawQuery(
             "SELECT id,name,matricula,role,signature_path,salt,pw_hash,force_change_password FROM users WHERE matricula=? AND active=1 AND deleted=0",
