@@ -1,0 +1,68 @@
+name: SENTINELA 0.7 - APK com icone e assinatura manual
+on:
+  push:
+    branches: [sentinela-0.7-automatico-assinatura]
+    paths: ['.github/workflows/compilar-v07.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Android SDK 35
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" --install "platforms;android-35" "build-tools;35.0.0"
+      - name: Validar icone fornecido e recursos
+        run: |
+          python3 -m pip install --quiet pillow
+          python3 - <<'PY'
+          from PIL import Image
+          from pathlib import Path
+          p=Path("app/src/main/res/drawable/sentinela_app_icon.webp")
+          im=Image.open(p)
+          im.verify()
+          im=Image.open(p).convert("RGBA")
+          assert im.width >= 96 and im.height >= 96, (im.width, im.height)
+          assert Path("app/src/main/java/br/gov/rs/sapucaiadosul/sentinela/HubAuth.kt").exists()
+          print("Icone Sentinela validado:",im.size)
+          PY
+          grep -F 'android:icon="@drawable/sentinela_app_icon"' app/src/main/AndroidManifest.xml
+      - name: Compilar APK isolado para instalacao de teste
+        run: gradle --no-daemon --stacktrace :app:assembleDebug
+      - name: Validar pacote e identificacao
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F "package: name='br.gov.rs.sapucaiadosul.sentinela.atualizavel.hub07'"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F "versionCode='13' versionName='0.7.0-piloto'"
+          cp "$APK" SENTINELA-COMPDEC-0.7.0-AUTOMATICO-PILOTO.apk
+          sha256sum SENTINELA-COMPDEC-0.7.0-AUTOMATICO-PILOTO.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SENTINELA-COMPDEC-0.7.0-APK
+          path: SENTINELA-COMPDEC-0.7.0-AUTOMATICO-PILOTO.apk
+          if-no-files-found: error
+      - name: Publicar APK piloto sem sobrescrever versoes anteriores
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TAG=v0.7.0-hub07
+          if gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
+            gh release upload "$TAG" SENTINELA-COMPDEC-0.7.0-AUTOMATICO-PILOTO.apk --repo "$GH_REPO" --clobber
+          else
+            gh release create "$TAG" SENTINELA-COMPDEC-0.7.0-AUTOMATICO-PILOTO.apk --repo "$GH_REPO" --title "Sentinela COMPDEC 0.7.0 - piloto" --notes "Teste com icone oficial, assinatura manuscrita livre do agente e login HUB automatico. HUB externo ainda depende de instalacao do gateway/Tailscale Funnel no servidor. Contas HUB necessarias. Nao utilizar em ocorrencias reais antes da homologacao. Instalacao paralela e nao migra registros antigos." --prerelease --target sentinela-0.7-automatico-assinatura
+          fi
