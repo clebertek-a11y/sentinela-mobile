@@ -26,7 +26,7 @@ jobs:
       - name: Instalar Android SDK
         run: |
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" --install "platforms;android-35" "build-tools;35.0.0"
-      - name: Preparar fontes 0.4
+      - name: Preparar fontes 0.5
         run: |
           unzip -oq sentinela_source_payload.zip -d .
           python3 - <<'PY'
@@ -34,7 +34,7 @@ jobs:
           b=Path('app/build.gradle.kts')
           s=b.read_text()
           assert 'applicationId = "br.gov.rs.sapucaiadosul.sentinela.atualizavel"' in s
-          assert 'versionCode = 10' in s
+          assert 'versionCode = 11' in s
           s=s.replace('signingConfig = signingConfigs.getByName("sentinela")', '// Assinatura privada executada apos compilacao')
           b.write_text(s)
           PY
@@ -43,11 +43,11 @@ jobs:
       - name: Exportar APK e ferramentas de assinatura
         run: |
           mkdir -p saida
-          cp app/build/outputs/apk/release/app-release-unsigned.apk saida/sentinela-0.4.0-unsigned.apk
+          cp app/build/outputs/apk/release/app-release-unsigned.apk saida/sentinela-0.5.0-unsigned.apk
           cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" saida/apksigner.jar
           ls -lh saida
       - uses: actions/upload-artifact@v4
         with:
-          name: SENTINELA-0.4-PARA-ASSINAR
+          name: SENTINELA-0.5-PARA-ASSINAR
           path: saida/*
           retention-days: 14
