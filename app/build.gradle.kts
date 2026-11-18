@@ -27,6 +27,10 @@ android {
         }
     }
     buildTypes {
+        debug {
+            applicationIdSuffix = ".hubpiloto"
+            versionNameSuffix = "-piloto"
+        }
         release {
             isMinifyEnabled = false
             signingConfig = signingConfigs.getByName("sentinela")
