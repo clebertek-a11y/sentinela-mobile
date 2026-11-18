@@ -55,9 +55,10 @@ class MainActivity : Activity() {
         window.statusBarColor = navy
         window.navigationBarColor = navy
         store = LocalStore(this)
+        HubConfig.ensure(this)
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-        if (store.hasUsers()) showLogin() else showBootstrap()
-        if (!prefs.getString("url","").isNullOrBlank()) { SyncJobService.periodic(this); SyncJobService.schedule(this) }
+        showLogin()
+        if (prefs.contains("hub_user")) { SyncJobService.periodic(this); SyncJobService.schedule(this) }
         checkForUpdates(false)
     }
 
@@ -359,16 +360,34 @@ class MainActivity : Activity() {
         pass.imeOptions = EditorInfo.IME_ACTION_DONE
         c.addView(button("Entrar") {
             val matricula = mat.text.toString().trim()
-            if (matricula.isBlank() || pass.text.isBlank()) return@button toast("Informe matrícula e senha")
-            val user = store.login(matricula, pass.text.toString())
-            if (user == null) toast("Acesso não autorizado. Confira a matrícula e a senha cadastradas neste aparelho.")
-            else {
-                currentUser = user
-                if (user.mustChangePassword) changePasswordAtLogin(user) else dashboard()
+            val senha = pass.text.toString()
+            if (matricula.isBlank() || senha.isBlank()) return@button toast("Informe matrícula e senha")
+            HubAuth.authenticate(this,matricula,senha) { identity, error ->
+                if (identity != null) {
+                    try {
+                        val user = store.provisionFromHub(identity.name.ifBlank { matricula },
+                            identity.matricula, identity.role, senha)
+                        prefs.edit().putString("hub_user",identity.matricula)
+                            .putBoolean("hub_verified_" + identity.matricula,true).apply()
+                        SecureSecrets.save(this,senha)
+                        currentUser=user
+                        SyncJobService.periodic(this)
+                        SyncJobService.schedule(this)
+                        dashboard()
+                    } catch(e:Exception) { toast("Erro ao preparar acesso: " + (e.message ?: "credencial inválida")) }
+                } else if (error?.startsWith("HUB inacessível") == true) {
+                    // O primeiro login precisa ser validado pelo HUB. Offline somente após isso.
+                    val user = store.login(matricula,senha)
+                    if (user != null && prefs.getBoolean("hub_verified_" + matricula,false)) {
+                        currentUser=user
+                        toast("Sem internet: trabalhando offline. O envio ocorrerá depois.")
+                        dashboard()
+                    } else toast("Primeiro acesso exige internet e conta ativa no HUB. " + error)
+                } else toast(error ?: "Autenticação não autorizada no HUB")
             }
         })
         c.addView(button("Esqueci minha senha", false) { forgotPassword() })
-        body.addView(label("Os usuários deste piloto são locais: uma conta de outro aparelho não acessa este. Caso não tenha um código de recuperação, procure o administrador.", 12f))
+        body.addView(label("O primeiro acesso valida sua conta com o HUB. Depois disso você poderá trabalhar offline; os dados serão enviados quando a internet retornar.", 12f))
     }
 
     /** Código aleatório exibido somente uma vez. Não salvar senha nem código em relatórios ou logs. */
@@ -1018,23 +1037,14 @@ class MainActivity : Activity() {
         updates.addView(label("Versão instalada: ${UpdateChecker.installedVersion(this)}", 13f, true))
         updates.addView(button("Verificar atualizações",false) {checkForUpdates(true)})
         updates.addView(label("A instalação de APK exige sua autorização. A atualização preserva dados apenas com assinatura digital compatível. Para os testes iniciais, exporte os boletins antes de reinstalar.",12f))
-        val c = section(body,"Conexão com Sentinela HUB")
-        c.addView(label("O HUB precisa estar instalado e acessível por HTTPS com certificado confiável. Use uma conta de operador criada no HUB. Não utilize caminho de pasta SMB nem HTTP.",13f))
-        val url = field(c,"Endereço HTTPS do HUB", "https://hub.exemplo.br", prefs.getString("url","")?:"")
-        val username = field(c,"Usuário do HUB", "Conta operador",prefs.getString("hub_user","")?:"")
-        val secret = field(c,"Senha do HUB (deixe vazio para manter a anterior)",password=true)
-        c.addView(button("Salvar configuração") {
-            val address = url.text.toString().trim()
-            if(!address.startsWith("https://") || address.contains("@") || runCatching { java.net.URL(address).path.trim('/').isNotBlank() }.getOrDefault(true)) return@button toast("Informe somente a URL raiz HTTPS do HUB")
-            if(username.text.toString().trim().isBlank()) return@button toast("Informe o usuário do HUB")
-            prefs.edit().putString("url",address.trimEnd('/')).putString("hub_user",username.text.toString().trim()).apply()
-            if(secret.text.isNotEmpty()) SecureSecrets.save(this,secret.text.toString())
-            SyncJobService.periodic(this)
-            SyncJobService.schedule(this)
-            toast("Configuração salva. Verifique o teste de sincronização.")
-        })
+        val c = section(body,"Conexão automática com Sentinela HUB")
+        c.addView(label("O endereço do HUB é incorporado ao aplicativo. O agente não precisa instalar VPN nem configurar servidor. A TI precisa habilitar a conexão HTTPS externa no SERVIDOR02.",13f))
+        val url = field(c,"Endereço HTTPS do HUB (gerenciado pela TI)", value=HubConfig.URL).apply { isEnabled = false }
+        val username = field(c,"Usuário do HUB",value=prefs.getString("hub_user","")?:"").apply { isEnabled=false }
+
+        c.addView(label("Conectado como: " + (prefs.getString("hub_user","Aguardando login") ?: "Aguardando login"),12f))
         c.addView(button("Testar conexão e sincronizar",false) { SyncJobService.now(this) { toast(it); settings() } })
-        c.addView(label("Conflitos aparecem com estado CONFLITO; não são sobrescritos automaticamente. Acesso externo exige HTTPS confiável.",12f))
+        c.addView(label("Falhas de conexão mantêm os registros no aparelho. Conflitos exigem conferência administrativa.",12f))
         val warn = section(body,"Segurança e dados locais")
         warn.addView(label("Dados armazenados no espaço privado do aplicativo. Não limpe os dados nem desinstale antes de exportar e confirmar o arquivamento. Senhas possuem hash com salt. O piloto ainda não oferece criptografia de banco ou backup remoto completo.",13f))
         warn.addView(label("O aplicativo não usa o banco SIGOPE ou BA da Lovable.",13f,true))
