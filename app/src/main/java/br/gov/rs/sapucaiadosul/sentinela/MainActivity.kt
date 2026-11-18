@@ -195,6 +195,7 @@ class MainActivity : Activity() {
         scroll.addView(root)
         keyboardSafeScroll(scroll)
         setContentView(scroll)
+        scroll.post { scroll.requestApplyInsets() }
         return body
     }
     private fun has(right: String): Boolean = currentUser?.let { store.hasRight(it.id, right) } == true
