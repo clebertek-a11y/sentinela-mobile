@@ -1,0 +1,5 @@
+# Catálogo do SENTINELA Desktop para Windows
+# Publicar novo version + URL somente após validar instalador no Windows.
+version=0.3.0
+url=
+notes=Versão piloto 0.3.0 do Sentinela COMPDEC para Windows.
