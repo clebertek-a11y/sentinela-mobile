@@ -749,34 +749,28 @@ class MainActivity : Activity() {
         val outros = field(c, "Outros agentes (não assinam o BA)",value=old.outrosAgentes)
         val gps = field(c, "Localização / observações de GPS",value=old.gps)
         if(readonly) listOf(historico,providencias,responsavel,doc,outros,gps).forEach { it.isEnabled=false }
-        val signer = section(body, "Primeiro agente — assinatura cadastrada")
-        signer.addView(label("A assinatura cadastrada será recuperada pela matrícula somente após confirmar a senha do agente.",12f))
-        val mat = field(signer,"Matrícula do primeiro agente",value=old.agenteMatricula)
-        if(readonly) mat.isEnabled=false
+        // Assinatura manuscrita livre no atendimento, como a do responsavel.
+        // A identidade do usuario que abriu o BA continua registrada na auditoria.
+        val signer = section(body, "Assinatura do agente no local")
+        signer.addView(label("O agente assina com o dedo na tela, sem precisar cadastrar a assinatura antes. Identifique quem esta assinando.",12f))
+        val mat = field(signer,"Matrícula do agente",
+            value=old.agenteMatricula.ifBlank { currentUser?.matricula.orEmpty() })
+        val agentNameField = field(signer,"Nome do agente",
+            value=old.agenteNome.ifBlank { currentUser?.name.orEmpty() })
+        if(readonly) { mat.isEnabled=false;agentNameField.isEnabled=false }
         var agentSignature = old.agenteSignature
-        var agentName = old.agenteNome
-        val agentLabel = label("Agente: ${old.agenteNome.ifBlank { "não identificado" }} • ${if (old.agenteSignature.isNotBlank()) "assinatura confirmada" else "sem assinatura"}", 12f)
+        val agentLabel = label(if (agentSignature.isNotBlank() && File(agentSignature).exists())
+            "Assinatura manuscrita registrada" else "Assinatura pendente",12f)
         signer.addView(agentLabel)
-        if (!readonly) signer.addView(button("Recuperar e confirmar assinatura",false) {
-            val u = store.userByMatricula(mat.text.toString())
-            if (u == null || u.signaturePath.isBlank()) return@button toast("Matrícula não cadastrada ou assinatura ausente")
-            val pass = EditText(this).apply {
-                hint = "Senha do agente ${u.name}"; inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+        if (!readonly) signer.addView(button("Assinar na tela do celular",false) {
+            if (mat.text.toString().trim().isEmpty() || agentNameField.text.toString().trim().isEmpty()) {
+                return@button toast("Informe o nome e a matrícula do agente antes de assinar")
             }
-            AlertDialog.Builder(this).setTitle("Confirmar assinatura de ${u.name}")
-                .setMessage("O agente deve digitar sua própria senha. O registro ficará vinculado ao BA ${o.number}.")
-                .setView(pass)
-                .setNegativeButton("Cancelar",null)
-                .setPositiveButton("Confirmar") {_,_->
-                    if (store.login(u.matricula,pass.text.toString())?.id != u.id) toast("Confirmação inválida")
-                    else {
-                        val snapshot = File(FileTools.dir(this,id),"assinatura_primeiro_agente.png")
-                        File(u.signaturePath).copyTo(snapshot, overwrite = true)
-                        agentSignature = snapshot.absolutePath; agentName = u.name
-                        agentLabel.text = "Agente: ${u.name} • assinatura confirmada"
-                        toast("Assinatura vinculada ao atendimento")
-                    }
-                }.show()
+            collectSignature("Assinatura de " + agentNameField.text.toString().trim(),
+                File(FileTools.dir(this,id),"assinatura_primeiro_agente.png")) { path ->
+                agentSignature = path
+                agentLabel.text = "Assinatura registrada • " + agentNameField.text.toString().trim()
+            }
         })
         var responsibleSignature = old.responsavelSignature
         val resident = section(body, "Assinatura do responsável no local")
@@ -790,7 +784,7 @@ class MainActivity : Activity() {
         })
         fun report(): Report = Report(id, historico.text.toString().trim(), providencias.text.toString().trim(),
             responsavel.text.toString().trim(),doc.text.toString().trim(),mat.text.toString().trim(),
-            agentName,agentSignature,responsibleSignature,outros.text.toString().trim(),gps.text.toString().trim(), LocalStore.now())
+            agentNameField.text.toString().trim(),agentSignature,responsibleSignature,outros.text.toString().trim(),gps.text.toString().trim(), LocalStore.now())
         val photosBlock = section(body, "Registro fotográfico")
         val photoCounter = label("${store.photos(id).size} fotografia(s) armazenada(s) neste aparelho", 13f)
         photosBlock.addView(photoCounter)
