@@ -1,0 +1,37 @@
+name: Publicar APK SENTINELA 0.3 (somente testes)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/publicar-v03.yml'
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Recuperar APK da compilacao validada
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          mkdir -p release
+          gh run download 44220313525 --repo "$GH_REPO" --name SENTINELA-Mobile-APK-Teste --dir release
+          test -s release/app-debug.apk
+          mv release/app-debug.apk release/SENTINELA-Mobile-0.3-TESTE.apk
+          sha256sum release/SENTINELA-Mobile-0.3-TESTE.apk
+
+      - name: Publicar arquivo APK para download direto
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if gh release view v0.3.0-teste --repo "$GH_REPO" >/dev/null 2>&1; then
+            gh release upload v0.3.0-teste release/SENTINELA-Mobile-0.3-TESTE.apk --repo "$GH_REPO" --clobber
+          else
+            gh release create v0.3.0-teste release/SENTINELA-Mobile-0.3-TESTE.apk --repo "$GH_REPO" --title "SENTINELA Mobile 0.3 - recuperacao e usuarios" --notes "PILOTO: login local corrigido; cadastro inicial do administrador preparado para matricula 93866 (senha pessoal definida somente no aparelho, nao embutida no APK); Esqueci minha senha com codigo de uso unico; Gestao de usuarios com editar, ativar/desativar, perfis, reset de senha e troca obrigatoria no primeiro login. Migracao nao destrutiva do banco. So para testes com dados ficticios. ATENCAO: chave de assinatura de depuracao temporaria, logo pode ser necessario desinstalar a versao 0.2 antes de instalar esta 0.3. DESINSTALAR APAGA DADOS LOCAIS; exporte tudo antes. Em compilacao de producao deve-se usar assinatura institucional permanente e autenticacao central." --prerelease
+          fi
