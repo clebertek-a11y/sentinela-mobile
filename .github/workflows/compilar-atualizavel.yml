@@ -1,0 +1,53 @@
+name: Compilar SENTINELA atualizavel para assinatura
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'sentinela_source_payload.zip'
+      - '.github/workflows/compilar-atualizavel.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Instalar Android SDK
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" --install "platforms;android-35" "build-tools;35.0.0"
+      - name: Preparar fontes 0.4
+        run: |
+          unzip -oq sentinela_source_payload.zip -d .
+          python3 - <<'PY'
+          from pathlib import Path
+          b=Path('app/build.gradle.kts')
+          s=b.read_text()
+          assert 'applicationId = "br.gov.rs.sapucaiadosul.sentinela.atualizavel"' in s
+          assert 'versionCode = 10' in s
+          s=s.replace('signingConfig = signingConfigs.getByName("sentinela")', '// Assinatura privada executada apos compilacao')
+          b.write_text(s)
+          PY
+      - name: Compilar APK nao assinado
+        run: gradle --no-daemon --stacktrace :app:assembleRelease
+      - name: Exportar APK e ferramentas de assinatura
+        run: |
+          mkdir -p saida
+          cp app/build/outputs/apk/release/app-release-unsigned.apk saida/sentinela-0.4.0-unsigned.apk
+          cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" saida/apksigner.jar
+          ls -lh saida
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SENTINELA-0.4-PARA-ASSINAR
+          path: saida/*
+          retention-days: 14
