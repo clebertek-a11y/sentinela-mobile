@@ -1,8 +1,8 @@
 {
   "applicationId": "br.gov.rs.sapucaiadosul.sentinela.atualizavel",
-  "versionCode": 10,
-  "versionName": "0.4.0",
-  "apkUrl": "https://github.com/clebertek-a11y/sentinela-mobile/releases/download/v0.4.0-atualizavel/SENTINELA-Mobile-0.4.0-ATUALIZAVEL.apk",
-  "notes": "Canal atualizavel do SENTINELA: verificacao automatica de novas versoes ao abrir e consulta manual em Configuracoes.",
+  "versionCode": 11,
+  "versionName": "0.5.0",
+  "apkUrl": "https://github.com/clebertek-a11y/sentinela-mobile/releases/download/v0.5.0-atualizavel/SENTINELA-Mobile-0.5.0-ATUALIZACAO.apk",
+  "notes": "Novo painel SIGOPE com identidade visual da Defesa Civil, aceitar atendimento, permissoes individuais e historico em PDF. Versao piloto.",
   "required": false
 }
