@@ -1,0 +1,30 @@
+name: Preparar fontes Android para integracao HUB
+on:
+  push:
+    branches: [integracao-hub-android-20261118]
+    paths: ['.github/workflows/preparar-fontes-hub.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  extrair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extrair fontes sem alterar outros arquivos
+        run: |
+          set -euo pipefail
+          unzip -oq sentinela_source_payload.zip -d .
+          echo '=== ARQUIVOS DE ORIGEM ==='
+          find app -type f | head -100
+          echo '=== DOCUMENTOS DE CONFIGURACAO ==='
+          sed -n '1,110p' app/build.gradle.kts
+          echo '=== MANIFESTO ==='
+          cat app/src/main/AndroidManifest.xml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app build.gradle.kts settings.gradle.kts gradle.properties 2>/dev/null || true
+          if ! git diff --cached --quiet; then
+            git commit -m "Preparar fontes Android para integracao HUB"
+            git push origin HEAD:integracao-hub-android-20261118
+          fi
