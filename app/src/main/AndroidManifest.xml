@@ -7,7 +7,7 @@
         android:allowBackup="false"
         android:usesCleartextTraffic="false"
         android:icon="@drawable/sentinela_app_icon"
-        android:label="SENTINELA COMPDEC"
+        android:label="SENTINELA COMPDEC" android:roundIcon="@drawable/sentinela_app_icon"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:localeConfig="@xml/locales_config"
         android:supportsRtl="true">
