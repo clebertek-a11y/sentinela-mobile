@@ -8,16 +8,19 @@ import android.content.ContentValues
 import android.content.Intent
 import android.content.Context
 import android.graphics.Color
+import android.graphics.Rect
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
+import android.os.Build
 import android.provider.MediaStore
 import android.text.InputType
 import android.text.method.PasswordTransformationMethod
 import android.text.method.HideReturnsTransformationMethod
 import android.view.inputmethod.EditorInfo
 import android.view.WindowManager
+import android.view.WindowInsets
 import android.content.pm.ApplicationInfo
 import android.text.Editable
 import android.text.TextWatcher
@@ -118,6 +121,18 @@ class MainActivity : Activity() {
             wrapper.addView(toggle)
         }
         parent.addView(wrapper, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = sp(14) })
+        // Se o teclado abrir depois do foco, solicitar nova rolagem quando ele ja estiver visivel.
+        input.setOnFocusChangeListener { view, focused ->
+            if (focused) {
+                view.postDelayed({
+                    if (view.hasFocus()) {
+                        view.requestRectangleOnScreen(
+                            Rect(0, 0, view.width, view.height + sp(30)), true
+                        )
+                    }
+                }, 280)
+            }
+        }
         return input
     }
     private fun section(content: LinearLayout, title: String): LinearLayout {
@@ -126,6 +141,39 @@ class MainActivity : Activity() {
         content.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = sp(12) })
         return card
     }
+    /**
+     * Android 15+ pode desenhar atras do teclado apesar do adjustResize.
+     * Reserva a area indicada por WindowInsets.Type.ime para que o ScrollView
+     * leve o campo de texto em foco para uma posicao visivel.
+     */
+    private fun keyboardSafeScroll(scroll: ScrollView) {
+        scroll.isFillViewport = true
+        scroll.clipToPadding = false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            scroll.setOnApplyWindowInsetsListener { view, insets ->
+                val keyboard = insets.getInsets(WindowInsets.Type.ime()).bottom
+                val navigation = insets.getInsets(WindowInsets.Type.navigationBars()).bottom
+                val safeBottom = maxOf(keyboard, navigation)
+                if (view.paddingBottom != safeBottom) {
+                    view.setPadding(view.paddingLeft, view.paddingTop,
+                        view.paddingRight, safeBottom)
+                }
+                if (insets.isVisible(WindowInsets.Type.ime())) {
+                    val focus = currentFocus
+                    if (focus != null && focus !== scroll) {
+                        focus.post {
+                            if (focus.isFocused) focus.requestRectangleOnScreen(
+                                Rect(0, 0, focus.width, focus.height + sp(32)), true
+                            )
+                        }
+                    }
+                }
+                insets
+            }
+        }
+        scroll.requestApplyInsets()
+    }
+
     private fun screen(title: String, subtitle: String = "", back: (() -> Unit)? = null): LinearLayout {
         val root = vertical().apply { setBackgroundColor(bg) }
         val header = vertical().apply {
@@ -143,8 +191,9 @@ class MainActivity : Activity() {
         root.addView(body, LinearLayout.LayoutParams(-1, -2))
         root.addView(label("IAntzen Tecnologia — Soluções Inteligentes",11f,false,Color.rgb(103,118,139)).apply {gravity=Gravity.CENTER;setPadding(0,0,0,sp(15))})
         // O cabeçalho também rola, liberando espaço quando o teclado virtual está aberto.
-        val scroll = ScrollView(this).apply { isFillViewport = true; clipToPadding = false }
+        val scroll = ScrollView(this)
         scroll.addView(root)
+        keyboardSafeScroll(scroll)
         setContentView(scroll)
         return body
     }
@@ -357,7 +406,14 @@ class MainActivity : Activity() {
         val c = section(body, "Identificação")
         val mat = field(c, "Matrícula")
         val pass = field(c, "Senha", password = true)
+        mat.imeOptions = EditorInfo.IME_ACTION_NEXT
         pass.imeOptions = EditorInfo.IME_ACTION_DONE
+        mat.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_NEXT) {
+                pass.requestFocus()
+                true
+            } else false
+        }
         c.addView(button("Entrar") {
             val matricula = mat.text.toString().trim()
             val senha = pass.text.toString()
