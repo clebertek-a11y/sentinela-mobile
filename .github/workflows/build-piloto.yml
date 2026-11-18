@@ -1,0 +1,77 @@
+name: Compilar SENTINELA Piloto 0.3.1 (instalacao separada)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/build-piloto.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  compilar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Preparar Android SDK
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" --install "platforms;android-35" "build-tools;35.0.0"
+      - name: Extrair a versao 0.3
+        run: unzip -oq sentinela_source_payload.zip -d .
+      - name: Ajustar nome e identificador para instalacao paralela
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          f=Path("app/build.gradle.kts")
+          c=f.read_text()
+          assert 'applicationId = "br.gov.rs.sapucaiadosul.sentinela"' in c
+          assert 'versionCode = 3' in c
+          assert 'versionName = "0.3.0"' in c
+          c=c.replace('applicationId = "br.gov.rs.sapucaiadosul.sentinela"','applicationId = "br.gov.rs.sapucaiadosul.sentinela.piloto"')
+          c=c.replace('versionCode = 3','versionCode = 4')
+          c=c.replace('versionName = "0.3.0"','versionName = "0.3.1"')
+          f.write_text(c)
+          m=Path("app/src/main/AndroidManifest.xml")
+          t=m.read_text()
+          assert 'android:label="SENTINELA"' in t
+          m.write_text(t.replace('android:label="SENTINELA"', 'android:label="SENTINELA PILOTO"'))
+          k=Path("app/src/main/java/br/gov/rs/sapucaiadosul/sentinela/MainActivity.kt")
+          s=k.read_text()
+          old='"SENTINELA • DEFESA CIVIL"'
+          assert old in s
+          k.write_text(s.replace(old,'"SENTINELA PILOTO • 0.3.1"'))
+          assert '"Esqueci minha senha"' in s
+          assert 'fun manageUsers' in s or 'Gestão de usuários' in s or 'Gerenciar usuários' in s or 'Usuários' in s
+          print("Pacote de testes independente preparado")
+          PY
+      - name: Compilar aplicativo Android
+        run: gradle --no-daemon :app:assembleDebug
+      - name: Verificar pacote Android
+        run: |
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | head -n 5
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep "package: name='br.gov.rs.sapucaiadosul.sentinela.piloto'"
+          mkdir -p distribuicao
+          cp "$APK" distribuicao/SENTINELA-Mobile-PILOTO-0.3.1.apk
+          sha256sum distribuicao/SENTINELA-Mobile-PILOTO-0.3.1.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SENTINELA-PILOTO-0.3.1-APK
+          path: distribuicao/SENTINELA-Mobile-PILOTO-0.3.1.apk
+          if-no-files-found: error
+      - name: Publicar link direto para instalacao
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create v0.3.1-piloto distribuicao/SENTINELA-Mobile-PILOTO-0.3.1.apk --repo "$GH_REPO" --title "SENTINELA PILOTO 0.3.1 - instalacao separada" --notes "Piloto independente para recuperar acesso aos testes: instalacao em paralelo com o SENTINELA antigo, sem desinstalar ou modificar registros. Inicie pelo icone SENTINELA PILOTO. Inclui a tela Esqueci minha senha e gestao local de usuarios da versao 0.3. Ainda sem homologacao para dados reais." --prerelease
