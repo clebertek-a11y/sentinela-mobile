@@ -50,6 +50,51 @@ class MainActivity : Activity() {
     private var pilotUnlockVerified = false
     private val prefs by lazy { getSharedPreferences("sync_settings", Context.MODE_PRIVATE) }
 
+    private var realtime: HubRealtime? = null
+    private var activeDraftSaver: (() -> Unit)? = null
+    private val draftHandler = Handler(Looper.getMainLooper())
+    private var draftJob: Runnable? = null
+
+    private fun scheduleDraftSave() {
+        draftJob?.let { draftHandler.removeCallbacks(it) }
+        val job = Runnable {
+            try { activeDraftSaver?.invoke() }
+            catch (e:Exception) { toast("Rascunho nao salvo: " + (e.message ?: "verifique os dados")) }
+        }
+        draftJob = job
+        draftHandler.postDelayed(job, 1100L)
+    }
+
+    private fun flushDraft() {
+        draftJob?.let { draftHandler.removeCallbacks(it) }
+        draftJob = null
+        val saver=activeDraftSaver
+        activeDraftSaver=null
+        try { saver?.invoke() } catch (_:Exception) { }
+    }
+
+    private fun watchDraft(inputs: List<EditText>, save: () -> Unit) {
+        activeDraftSaver=save
+        inputs.forEach { input ->
+            input.addTextChangedListener(object:TextWatcher {
+                override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int) {}
+                override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int) { scheduleDraftSave() }
+                override fun afterTextChanged(s:Editable?) {}
+            })
+        }
+    }
+
+    private fun explicitLogout() {
+        flushDraft()
+        realtime?.stop();realtime=null
+        stopForegroundSync()
+        SyncJobService.cancel(this)
+        prefs.edit().putBoolean("session_active",false).remove("hub_user").apply()
+        SecureSecrets.clear(this)
+        showLogin()
+    }
+
+
     /** Enquanto a tela esta aberta: consultar alteracoes sem depender do JobScheduler. */
     private val liveHandler = Handler(Looper.getMainLooper())
     private var foregroundSyncStarted = false
@@ -80,10 +125,22 @@ class MainActivity : Activity() {
         foregroundSyncStarted = true
         liveHandler.removeCallbacks(foregroundSyncTick)
         liveHandler.post(foregroundSyncTick)
+        realtime=HubRealtime(applicationContext) { changed, revoked ->
+            if(revoked) {
+                toast("Acesso revogado ou senha alterada no HUB. Entre novamente.")
+                prefs.edit().putBoolean("session_active",false).apply()
+                showLogin()
+            } else if(changed && foregroundSyncStarted && currentUser!=null) {
+                liveHandler.removeCallbacks(foregroundSyncTick)
+                liveHandler.post(foregroundSyncTick)
+            }
+        }.also { it.start() }
     }
 
     private fun stopForegroundSync() {
         foregroundSyncStarted = false
+        realtime?.stop()
+        realtime=null
         liveHandler.removeCallbacks(foregroundSyncTick)
     }
 
@@ -102,6 +159,7 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() {
+        flushDraft()
         stopForegroundSync()
         super.onPause()
     }
@@ -118,8 +176,17 @@ class MainActivity : Activity() {
         store = LocalStore(this)
         HubConfig.ensure(this)
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-        showLogin()
-        if (prefs.contains("hub_user")) { SyncJobService.periodic(this); scheduleSync() }
+        val remembered=prefs.getString("hub_user","").orEmpty()
+        val restored=if (prefs.getBoolean("session_active",false) &&
+            prefs.getBoolean("hub_verified_" + remembered,false) &&
+            SecureSecrets.read(this).isNotBlank())
+            store.userByMatricula(remembered) else null
+        if(restored != null && restored.active) {
+            currentUser=restored
+            dashboard()
+            SyncJobService.periodic(this)
+            scheduleSync()
+        } else showLogin()
         checkForUpdates(false)
     }
 
@@ -233,6 +300,7 @@ class MainActivity : Activity() {
     }
 
     private fun screen(title: String, subtitle: String = "", back: (() -> Unit)? = null): LinearLayout {
+        flushDraft()
         refreshVisibleScreen = null
         val root = vertical().apply { setBackgroundColor(bg) }
         val header = vertical().apply {
@@ -303,6 +371,7 @@ class MainActivity : Activity() {
     }
 
     private fun openingScreen(title: String, sub: String): LinearLayout {
+        flushDraft()
         refreshVisibleScreen = null
         val shell = vertical().apply { setBackgroundColor(darkBg) }
         val scroll = ScrollView(this).apply { isFillViewport = true }
@@ -355,7 +424,7 @@ class MainActivity : Activity() {
         info.addView(label("Perfil: ${u.role}\nMatrícula: ${u.matricula}",14f))
         info.addView(label("Permissões disponíveis: ${Rights.custom.filter { has(it) }.joinToString { Rights.labels[it] ?: it }}",12f))
         info.addView(button("Alterar minha senha", false) { changePasswordAtLogin(u) })
-        info.addView(button("Sair da conta",false) {showLogin()})
+        info.addView(button("Sair da conta",false) { explicitLogout() })
     }
 
     private fun reportsScreen() {
@@ -459,6 +528,7 @@ class MainActivity : Activity() {
     }
 
     private fun showLogin() {
+        flushDraft()
         stopForegroundSync()
         currentUser = null
         val body = screen("Acesso operacional", "SIGOPE e Boletim de Atendimento em um único aplicativo")
@@ -488,7 +558,8 @@ class MainActivity : Activity() {
                         val user = store.provisionFromHub(identity.name.ifBlank { matricula },
                             identity.matricula, identity.role, senha)
                         prefs.edit().putString("hub_user",identity.matricula)
-                            .putBoolean("hub_verified_" + identity.matricula,true).apply()
+                            .putBoolean("hub_verified_" + identity.matricula,true)
+                            .putBoolean("session_active",true).apply()
                         SecureSecrets.save(this,senha)
                         currentUser=user
                         SyncJobService.periodic(this)
@@ -501,6 +572,7 @@ class MainActivity : Activity() {
                     val user = store.login(matricula,senha)
                     if (user != null && prefs.getBoolean("hub_verified_" + matricula,false)) {
                         currentUser=user
+                        prefs.edit().putBoolean("session_active",true).apply()
                         toast("Sem internet: trabalhando offline. O envio ocorrerá depois.")
                         dashboard()
                         beginForegroundSync()
