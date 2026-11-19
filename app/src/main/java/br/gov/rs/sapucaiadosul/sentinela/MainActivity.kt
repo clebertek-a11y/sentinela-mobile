@@ -266,7 +266,7 @@ class MainActivity : Activity() {
      * Lista completa do BA com selecao multipla por grupo, sem depender de Lovable.
      * Grupos fechados economizam espaco na tela do agente.
      */
-    private fun typeChecklist(parent: LinearLayout, selected: MutableSet<String>) {
+    private fun typeChecklist(parent: LinearLayout, selected: MutableSet<String>, readOnly: Boolean = false) {
         TipoOcorrenciaCatalogo.grupos.forEach { (group,types) ->
             val block=vertical()
             val title=button(group+"  ▾",false) {
@@ -280,6 +280,7 @@ class MainActivity : Activity() {
                 block.addView(CheckBox(this).apply {
                     text=type;textSize=12.5f;setTextColor(ink)
                     isChecked=value in selected
+                    isEnabled=!readOnly
                     setOnCheckedChangeListener { _,checked ->
                         if(checked)selected.add(value) else selected.remove(value)
                         scheduleDraftSave()
@@ -310,7 +311,7 @@ class MainActivity : Activity() {
     private fun selected(control: Spinner): String =
         control.selectedItem?.toString()?.takeUnless { it=="Selecione" }.orEmpty()
 
-    private fun staffEditor(parent: LinearLayout, initial: List<BAServidor>): MutableList<Pair<EditText,EditText>> {
+    private fun staffEditor(parent: LinearLayout, initial: List<BAServidor>, readOnly: Boolean = false): MutableList<Pair<EditText,EditText>> {
         val entries=mutableListOf<Pair<EditText,EditText>>()
         val container=vertical();parent.addView(container)
         fun add(name: String, matricula: String) {
@@ -318,12 +319,13 @@ class MainActivity : Activity() {
             val row=row()
             val n=field(section,"Nome do servidor",value=name)
             val m=field(section,"Matrícula do servidor",value=matricula)
-            val remove=button("Remover servidor",false) {
-                container.removeView(section)
-                entries.remove(n to m)
-                scheduleDraftSave()
-            }
-            section.addView(remove)
+            if(!readOnly) {
+                section.addView(button("Remover servidor",false) {
+                    container.removeView(section)
+                    entries.remove(n to m)
+                    scheduleDraftSave()
+                })
+            } else {n.isEnabled=false;m.isEnabled=false}
             container.addView(section)
             entries.add(n to m)
             listOf(n,m).forEach { edit ->
@@ -335,7 +337,7 @@ class MainActivity : Activity() {
             }
         }
         initial.forEach { add(it.nome,it.matricula) }
-        parent.addView(button("＋ Adicionar servidor",false){add("","");scheduleDraftSave()})
+        if(!readOnly) parent.addView(button("＋ Adicionar servidor",false){add("","");scheduleDraftSave()})
         return entries
     }
 
@@ -1114,7 +1116,7 @@ class MainActivity : Activity() {
         val tipos=section(body,"Tipos de ocorrência — marque uma ou mais")
         val selectedTypes=oldExtra.tiposOcorrencia.toMutableSet()
         if (selectedTypes.isEmpty() && o.tipo.isNotBlank()) selectedTypes.add(o.tipo)
-        typeChecklist(tipos,selectedTypes)
+        typeChecklist(tipos,selectedTypes,readonly)
         val outroTipo=field(tipos,"Outros — informar tipo diferente",value=oldExtra.outroTipo)
 
         val responsavelBox=section(body,"Responsável no momento da vistoria")
@@ -1137,7 +1139,7 @@ class MainActivity : Activity() {
         val providencias=field(section(body,"Providências adotadas"),
             "Providências adotadas",value=old.providencias)
         val servidores=section(body,"Servidores responsáveis — editáveis")
-        val staff=staffEditor(servidores,oldExtra.servidores)
+        val staff=staffEditor(servidores,oldExtra.servidores,readonly)
         val outros=field(servidores,"Observações sobre outros agentes",value=old.outrosAgentes)
         val gps=field(section(body,"Localização da ocorrência"),
             "Coordenadas / precisão / horário de captura",value=old.gps)
@@ -1195,7 +1197,7 @@ class MainActivity : Activity() {
             store.updateIncidentDetails(id,solicitante.text.toString().trim(),
                 telefone.text.toString().trim(),rua.text.toString().trim(),
                 bairro.text.toString().trim(),
-                selectedTypes.firstOrNull() ?: outroTipo.text.toString().trim(),
+                selectedTypes.firstOrNull() ?: outroTipo.text.toString().trim().ifBlank{o.tipo},
                 historico.text.toString(),author)
             val extra=extras()
             val extrasStore=BAExtrasStore(store)
