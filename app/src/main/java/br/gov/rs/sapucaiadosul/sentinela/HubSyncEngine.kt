@@ -276,11 +276,16 @@ class HubSyncEngine(private val context: Context) {
         val sources = mutableListOf<File>()
         store.photos(item.id).forEach { sources.add(File(it.path)) }
         if (item.pdfPath.isNotBlank()) sources.add(File(item.pdfPath))
+        val timeline=File(FileTools.dir(context,item.id),"HISTORICO_${item.number}.pdf")
+        if(timeline.isFile)sources.add(timeline)
         // Assinaturas permanecem no perfil e no BA assinado;
         // não são enviadas como PNG avulso para a pasta da ocorrência.
         var sent = 0
         for (f in sources) {
-            if (!f.isFile) throw IllegalStateException("Anexo local nao encontrado: " + f.name)
+            if(!f.isFile){
+                if(StorageCleaner.wasEvictedLocal(context,f.absolutePath))continue
+                throw IllegalStateException("Anexo local nao encontrado: " + f.name)
+            }
             if (f.length() > 16L*1024*1024) throw IllegalStateException("Anexo superior a 16 MB: " + f.name)
             val hash = sha256(f)
             if (hash in hashes) continue
@@ -303,6 +308,8 @@ class HubSyncEngine(private val context: Context) {
             val name=item.optString("name")
             val checksum=item.optString("sha256")
             if(!id.matches(Regex("[0-9a-f]{32}"))) continue
+            // Nunca baixar automaticamente um arquivo que o usuario limpou.
+            if(StorageCleaner.wasEvictedRemote(context,id,checksum))continue
             if(db.rawQuery("SELECT 1 FROM hub_remote_files WHERE file_id=?",arrayOf(id))
                     .use{it.moveToFirst()})continue
             val ext=name.substringAfterLast('.', "").lowercase()
