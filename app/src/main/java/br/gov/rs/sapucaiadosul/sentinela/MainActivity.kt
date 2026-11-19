@@ -16,6 +16,8 @@ import android.os.Bundle
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import org.json.JSONArray
+import org.json.JSONObject
 import android.provider.MediaStore
 import android.text.InputType
 import android.text.method.PasswordTransformationMethod
@@ -260,6 +262,87 @@ class MainActivity : Activity() {
         }
         return input
     }
+    /**
+     * Lista completa do BA com selecao multipla por grupo, sem depender de Lovable.
+     * Grupos fechados economizam espaco na tela do agente.
+     */
+    private fun typeChecklist(parent: LinearLayout, selected: MutableSet<String>) {
+        TipoOcorrenciaCatalogo.grupos.forEach { (group,types) ->
+            val block=vertical()
+            val title=button(group+"  ▾",false) {
+                block.visibility=if(block.visibility==View.VISIBLE) View.GONE else View.VISIBLE
+            }
+            parent.addView(title)
+            parent.addView(block)
+            block.visibility=if(selected.any { it.startsWith(group+" - ") }) View.VISIBLE else View.GONE
+            types.forEach { type ->
+                val value=group+" - "+type
+                block.addView(CheckBox(this).apply {
+                    text=type;textSize=12.5f;setTextColor(ink)
+                    isChecked=value in selected
+                    setOnCheckedChangeListener { _,checked ->
+                        if(checked)selected.add(value) else selected.remove(value)
+                        scheduleDraftSave()
+                    }
+                })
+            }
+        }
+    }
+
+    private fun selector(parent: LinearLayout, title: String, opts: List<String>, value: String): Spinner {
+        parent.addView(label(title,13f,true))
+        val control=Spinner(this).apply {
+            adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,
+                listOf("Selecione") + opts)
+            val n=(listOf("Selecione")+opts).indexOf(value)
+            setSelection(n.coerceAtLeast(0))
+            onItemSelectedListener=object: android.widget.AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(p:android.widget.AdapterView<*>?,v:View?,n:Int,id:Long) {
+                    scheduleDraftSave()
+                }
+                override fun onNothingSelected(p:android.widget.AdapterView<*>?) {}
+            }
+        }
+        parent.addView(control,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=sp(9) })
+        return control
+    }
+
+    private fun selected(control: Spinner): String =
+        control.selectedItem?.toString()?.takeUnless { it=="Selecione" }.orEmpty()
+
+    private fun staffEditor(parent: LinearLayout, initial: List<BAServidor>): MutableList<Pair<EditText,EditText>> {
+        val entries=mutableListOf<Pair<EditText,EditText>>()
+        val container=vertical();parent.addView(container)
+        fun add(name: String, matricula: String) {
+            val section=vertical()
+            val row=row()
+            val n=field(section,"Nome do servidor",value=name)
+            val m=field(section,"Matrícula do servidor",value=matricula)
+            val remove=button("Remover servidor",false) {
+                container.removeView(section)
+                entries.remove(n to m)
+                scheduleDraftSave()
+            }
+            section.addView(remove)
+            container.addView(section)
+            entries.add(n to m)
+            listOf(n,m).forEach { edit ->
+                edit.addTextChangedListener(object:TextWatcher {
+                    override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int){}
+                    override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int){scheduleDraftSave()}
+                    override fun afterTextChanged(s:Editable?){}
+                })
+            }
+        }
+        initial.forEach { add(it.nome,it.matricula) }
+        parent.addView(button("＋ Adicionar servidor",false){add("","");scheduleDraftSave()})
+        return entries
+    }
+
+    private fun staffValues(inputs: List<Pair<EditText,EditText>>): List<BAServidor> =
+        inputs.map { BAServidor(it.first.text.toString().trim(),it.second.text.toString().trim()) }
+            .filter { it.nome.isNotBlank() || it.matricula.isNotBlank() }
+
     private fun section(content: LinearLayout, title: String): LinearLayout {
         val card = vertical().apply { background = shape(Color.WHITE, 16); setPadding(sp(15), sp(13), sp(15), sp(15)) }
         card.addView(label(title, 17f, true, navy))
@@ -876,34 +959,86 @@ class MainActivity : Activity() {
     }
 
     private fun newIncident() {
-        if (!canOpen()) return toast("Somente operador ou administrador abre ocorrências")
-        val body = screen("Nova ocorrência", "Registro local no SIGOPE", ::dashboard)
-        val c = section(body, "Dados iniciais")
-        val cat = Spinner(this)
-        val categories = arrayOf("OCORRENCIAS", "VISTORIAS", "APOIOS OPERACIONAIS", "INTERDIÇÕES")
-        cat.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, categories)
-        c.addView(label("Categoria", 13f, true)); c.addView(cat)
-        val solicitante = field(c,"Solicitante")
-        val telefone = field(c,"Telefone")
-        val rua = field(c,"Endereço (rua e número)")
-        val bairro = field(c,"Bairro")
-        val tipo = field(c,"Natureza da ocorrência", "Ex.: Queda de árvore")
-        val descricao = field(c,"Descrição inicial")
-        val equipe = field(c,"Equipe designada", "Ex.: Equipe 01")
-        val prioridade = Spinner(this).apply {
-            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, arrayOf("Normal", "Baixa", "Alta", "Urgente"))
+        if (!canOpen()) return toast("Somente operador ou administrador abre ocorrencias")
+        val raw=prefs.getString("novo_rascunho","{}").orEmpty()
+        val draft=try { JSONObject(raw) } catch (_:Exception) { JSONObject() }
+        val body=screen("Nova ocorrência","Operador • Dados que integrarão automaticamente o BA",::dashboard)
+        val c=section(body,"Dados do solicitante")
+        val cat=selector(c,"Categoria",listOf("OCORRENCIAS","VISTORIAS","APOIOS OPERACIONAIS","INTERDIÇÕES"),draft.optString("categoria","OCORRENCIAS"))
+        val solicitante=field(c,"Solicitante",value=draft.optString("solicitante"))
+        val cpf=field(c,"CPF",value=draft.optString("cpf"))
+        val telefone=field(c,"Telefone",value=draft.optString("telefone"))
+        val rua=field(c,"Endereço (rua e número)",value=draft.optString("rua"))
+        val bairro=field(c,"Bairro",value=draft.optString("bairro"))
+        val classificacao=section(body,"Tipo do solicitante e atendimento")
+        val tipoSolicitante=selector(classificacao,"Tipo do solicitante",
+            listOf("Proprietário","Inquilino","Vizinho","Parente","Outros"),draft.optString("tipo_solicitante"))
+        val tipoAtendimento=selector(classificacao,"Modalidade",
+            listOf("Emergencial","Preventiva"),draft.optString("tipo_atendimento"))
+        val tipos=section(body,"Tipos de ocorrência • Marque uma ou mais opções")
+        val selectedTypes=mutableSetOf<String>()
+        val savedTypes=draft.optJSONArray("tipos_ocorrencia")
+        if(savedTypes!=null)for(i in 0 until savedTypes.length())selectedTypes.add(savedTypes.optString(i))
+        typeChecklist(tipos,selectedTypes)
+        val outro=field(tipos,"Outro tipo de ocorrência (quando não constar na lista)",
+            value=draft.optString("outro"))
+        val detalhes=section(body,"Informações iniciais e prioridade")
+        val descricao=field(detalhes,"Histórico inicial / informações do solicitante",
+            value=draft.optString("descricao"))
+        val equipe=field(detalhes,"Equipe designada",value=draft.optString("equipe"))
+        val prioridade=selector(detalhes,"Prioridade",listOf("Normal","Baixa","Alta","Urgente"),
+            draft.optString("prioridade","Normal"))
+        val servidores=section(body,"Servidores responsáveis")
+        val savedStaff=draft.optJSONArray("servidores")
+        val initial=if(savedStaff==null) emptyList() else (0 until savedStaff.length()).mapNotNull { i ->
+            savedStaff.optJSONObject(i)?.let { BAServidor(it.optString("nome"),it.optString("matricula")) }
         }
-        c.addView(label("Prioridade", 13f, true)); c.addView(prioridade)
-        c.addView(button("Registrar ocorrência") {
+        val staff=staffEditor(servidores,initial)
+
+        fun capture(): JSONObject = JSONObject().apply {
+            put("categoria",selected(cat));put("solicitante",solicitante.text.toString())
+            put("cpf",cpf.text.toString());put("telefone",telefone.text.toString())
+            put("rua",rua.text.toString());put("bairro",bairro.text.toString())
+            put("tipo_solicitante",selected(tipoSolicitante))
+            put("tipo_atendimento",selected(tipoAtendimento))
+            put("tipos_ocorrencia",JSONArray().apply { selectedTypes.forEach { put(it) } })
+            put("outro",outro.text.toString());put("descricao",descricao.text.toString())
+            put("equipe",equipe.text.toString());put("prioridade",selected(prioridade))
+            put("servidores",JSONArray().apply { staffValues(staff).forEach {
+                put(JSONObject().put("nome",it.nome).put("matricula",it.matricula)) } })
+        }
+        watchDraft(listOf(solicitante,cpf,telefone,rua,bairro,outro,descricao,equipe)) {
+            prefs.edit().putString("novo_rascunho",capture().toString()).commit()
+        }
+        servidores.addView(label("A lista de servidores poderá ser corrigida no BA.",12f))
+        val actions=section(body,"Gravação do operador")
+        actions.addView(button("Registrar ocorrência") {
             try {
-                val item = store.createIncident(cat.selectedItem.toString(),solicitante.text.toString(),
-                    telefone.text.toString(),rua.text.toString(),bairro.text.toString(),
-                    tipo.text.toString(),descricao.text.toString(),equipe.text.toString(),
-                    prioridade.selectedItem.toString(), currentUser!!.id)
+                val type=selectedTypes.firstOrNull() ?: outro.text.toString().trim()
+                if(type.isBlank()) return@button toast("Selecione ao menos um tipo de ocorrência")
+                if(solicitante.text.isBlank()||rua.text.isBlank())
+                    return@button toast("Informe solicitante e endereço")
+                val item=store.createIncident(
+                    selected(cat).ifBlank{"OCORRENCIAS"},solicitante.text.toString().trim(),
+                    telefone.text.toString().trim(),rua.text.toString().trim(),bairro.text.toString().trim(),
+                    type,descricao.text.toString(),equipe.text.toString(),
+                    selected(prioridade).ifBlank{"Normal"},currentUser!!.id)
+                BAExtrasStore(store).save(item.id,BAExtras(
+                    solicitanteCpf=cpf.text.toString().trim(),
+                    tipoSolicitante=selected(tipoSolicitante),
+                    tipoAtendimento=selected(tipoAtendimento),
+                    tiposOcorrencia=selectedTypes.toList(),
+                    outroTipo=outro.text.toString().trim(),
+                    servidores=staffValues(staff)
+                ))
+                activeDraftSaver=null
+                prefs.edit().remove("novo_rascunho").apply()
                 scheduleSync()
-                toast("Ocorrência ${item.number} criada offline"); openIncident(item.id)
-            } catch (e: Exception) { toast(e.message ?: "Erro ao registrar") }
+                toast("Ocorrência registrada. Pasta será criada no HUB após sincronização.")
+                openIncident(item.id)
+            } catch (e:Exception) { toast(e.message ?: "Falha ao registrar") }
         })
+        actions.addView(label("Dados incompletos serão preservados como rascunho neste aparelho.",12f))
     }
 
     private fun openIncident(id: String) {
