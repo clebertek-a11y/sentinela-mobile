@@ -34,6 +34,11 @@ class SyncJobService : JobService() {
     companion object {
         private const val IMMEDIATE = 7101
         private const val PERIODIC = 7102
+        fun cancel(ctx: Context) {
+            val scheduler=ctx.getSystemService(Context.JOB_SCHEDULER_SERVICE) as JobScheduler
+            scheduler.cancel(IMMEDIATE)
+            scheduler.cancel(PERIODIC)
+        }
         fun schedule(ctx: Context) {
             val scheduler=ctx.getSystemService(Context.JOB_SCHEDULER_SERVICE) as JobScheduler
             scheduler.schedule(JobInfo.Builder(IMMEDIATE, ComponentName(ctx,SyncJobService::class.java))
