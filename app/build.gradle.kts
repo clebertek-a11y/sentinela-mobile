@@ -10,8 +10,8 @@ android {
         applicationId = "br.gov.rs.sapucaiadosul.sentinela.atualizavel"
         minSdk = 29
         targetSdk = 35
-        versionCode = 16
-        versionName = "0.8.0"
+        versionCode = 17
+        versionName = "0.9.0"
     }
     // Chave institucional permanente: apenas variáveis de ambiente do CI.
     // Nunca colocar chaves de assinatura nem senhas no código/repositório.
@@ -28,7 +28,7 @@ android {
     }
     buildTypes {
         debug {
-            applicationIdSuffix = ".hub08"
+            applicationIdSuffix = ".hub09"
             versionNameSuffix = "-piloto"
         }
         release {
