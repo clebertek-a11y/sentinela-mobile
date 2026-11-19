@@ -518,8 +518,10 @@ class LocalStore(ctx: Context) : SQLiteOpenHelper(ctx, "sentinela_offline.db", n
         )
     }
 
-    fun saveReport(report: Report, author: String) {
+    fun saveReport(report: Report, author: String, automatic: Boolean = false) {
         require(canOperate(report.incidentId,author,Rights.BA)) { "Sem autorização para preencher o boletim" }
+        if (this.report(report.incidentId).copy(atualizadoEm="") ==
+            report.copy(atualizadoEm="")) return
         val cv = ContentValues().apply {
             put("incident_id", report.incidentId); put("historico", report.historico)
             put("providencias", report.providencias); put("responsavel", report.responsavel)
@@ -535,7 +537,7 @@ class LocalStore(ctx: Context) : SQLiteOpenHelper(ctx, "sentinela_offline.db", n
         try {
             db.insertWithOnConflict("reports", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
             db.update("incidents", ContentValues().apply {put("sync_state", "PENDENTE");put("updated_at", now())}, "id=?", arrayOf(report.incidentId))
-            logAction(db, report.incidentId, "BA salvo", author)
+            if (!automatic) logAction(db, report.incidentId, "BA salvo", author)
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
     }
