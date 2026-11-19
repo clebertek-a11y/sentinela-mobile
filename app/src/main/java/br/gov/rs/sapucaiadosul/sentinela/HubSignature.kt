@@ -43,7 +43,10 @@ object HubSignature {
                     try{
                         c.connectTimeout=10000;c.readTimeout=15000
                         c.setRequestProperty("Authorization","Bearer "+token)
-                        if(c.responseCode==404)return@Thread android.os.Handler(android.os.Looper.getMainLooper()).post{after(false)}
+                        if(c.responseCode==404){
+                            android.os.Handler(android.os.Looper.getMainLooper()).post{after(false)}
+                            return@Thread
+                        }
                         if(c.responseCode!=200)error("Assinatura remota indisponível")
                         val dir=File(ctx.filesDir,"assinaturas").apply{mkdirs()}
                         val file=File(dir,mat.replace(Regex("[^A-Za-z0-9_-]"),"_")+".png")
