@@ -74,9 +74,8 @@ class MainActivity : Activity() {
             if(location==null)return toast("Localização não disponível. Tente em área aberta.")
             val captured=SimpleDateFormat("dd/MM/yyyy HH:mm:ss",Locale("pt","BR"))
                 .format(java.util.Date(location.time))
-            val result=String.format(Locale.US,"Lat: %.6f, Lon: %.6f",location.latitude,location.longitude)
-                + "; Precisão: "+location.accuracy.toInt()+" m; Capturada: "+captured
-                + "; Fonte: "+provider
+            val result=String.format(Locale.US,"Lat: %.6f, Lon: %.6f",location.latitude,location.longitude) +
+                "; Precisão: ${location.accuracy.toInt()} m; Capturada: $captured; Fonte: $provider"
             target.setText(result)
             scheduleDraftSave()
             toast(if(location.accuracy>100f)
