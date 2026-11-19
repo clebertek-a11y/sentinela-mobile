@@ -50,15 +50,38 @@ class SyncJobService : JobService() {
                 .setPeriodic(15L*60*1000)
                 .build())
         }
-        fun now(ctx: Context, done: (String)->Unit) {
+        /**
+         * Sincronizacao sob demanda ou em primeiro plano.
+         * Executa fora da UI e sempre informa o resultado na thread principal.
+         * O HubSyncEngine serializa as chamadas simultaneas com o JobScheduler.
+         */
+        fun nowResult(ctx: Context, done: (HubSyncEngine.Result?, String?) -> Unit) {
             Thread {
-                val result=try {
-                    val r=HubSyncEngine(ctx.applicationContext).run()
-                    "Sincronizacao: " + r.sent + " enviados, " + r.received +
-                        " recebidos, " + r.attachments + " anexos; conflitos: " + r.conflicts
-                } catch (e:Exception) { "Falha na sincronizacao: " + (e.message ?: "sem conexao").take(160) }
-                Handler(Looper.getMainLooper()).post { done(result) }
+                val result = try {
+                    val r = HubSyncEngine(ctx.applicationContext).run()
+                    ctx.getSharedPreferences("sync_settings",Context.MODE_PRIVATE).edit()
+                        .putString("hub_last_status", "OK: " + r.sent + " enviados, " +
+                            r.received + " recebidos, " + r.attachments +
+                            " anexos, " + r.conflicts + " conflitos")
+                        .putLong("hub_last_success", System.currentTimeMillis()).apply()
+                    Pair(r, null)
+                } catch (e: Exception) {
+                    val error = (e.message ?: "conexao indisponivel").take(180)
+                    ctx.getSharedPreferences("sync_settings",Context.MODE_PRIVATE).edit()
+                        .putString("hub_last_status", "Falha: " + error).apply()
+                    Pair(null, error)
+                }
+                Handler(Looper.getMainLooper()).post { done(result.first, result.second) }
             }.start()
+        }
+
+        fun now(ctx: Context, done: (String)->Unit) {
+            nowResult(ctx) { result, error ->
+                if (result != null) done("Sincronizacao: " + result.sent +
+                    " enviados, " + result.received + " recebidos, " +
+                    result.attachments + " anexos; conflitos: " + result.conflicts)
+                else done("Falha na sincronizacao: " + (error ?: "sem conexao"))
+            }
         }
     }
 }
