@@ -1490,73 +1490,115 @@ class MainActivity : Activity() {
     }
 
     private fun userManagement() {
-        if (currentUser?.role != "ADMIN") return dashboard()
-        val body = screen("Gestão de usuários", "Edição, perfis, senhas e assinaturas", ::dashboard)
-        val intro = section(body, "Contas deste aparelho")
-        intro.addView(label("Apenas o administrador pode editar cadastros ou redefinir senhas. As alterações são locais e não afetam outros celulares.", 12f))
-        store.users().forEach { u ->
-            val status = if (u.active) "ATIVO" else "INATIVO"
-            val c = section(body,"${u.name} • ${u.matricula}")
-            c.addView(label("Perfil: ${u.role} • $status • Assinatura: ${if(u.signaturePath.isBlank()) "pendente" else "cadastrada"}",12f))
-            c.addView(button("Editar cadastro e permissões",false) { editUserScreen(u.id) })
-            c.addView(button("Redefinir senha",false) { resetUserPasswordScreen(u.id) })
-            c.addView(button("Gerar novo código de recuperação",false) {
-                AlertDialog.Builder(this).setTitle("Substituir código de recuperação?")
-                    .setMessage("O código anterior deixará de funcionar. Entregue o novo código apenas ao titular desta conta.")
-                    .setNegativeButton("Cancelar",null)
-                    .setPositiveButton("Gerar") {_,_->
-                        try {showRecoveryCode(store.issueRecoveryCode(u.id, currentUser!!.id)) {userManagement()}}
-                        catch (e: Exception) {toast(e.message ?: "Falha ao gerar código")}
-                    }.show()
-            })
-            if (u.id != currentUser!!.id) c.addView(button("Excluir acesso (preservar histórico)",false) {
-                AlertDialog.Builder(this).setTitle("Excluir acesso de ${u.name}?")
-                    .setMessage("O usuário não poderá entrar novamente. Seus boletins e histórico permanecem arquivados. Esta ação não apaga ocorrências.")
-                    .setNegativeButton("Cancelar",null)
-                    .setPositiveButton("Excluir") {_,_->
-                        try {store.deleteUser(u.id,currentUser!!.id);toast("Acesso excluído");userManagement()}
-                        catch(e:Exception){toast(e.message?:"Não foi possível excluir")}
-                    }.show()
-            })
-            if (u.active) c.addView(button("Cadastrar / atualizar assinatura",false) {
-                val dest = File(filesDir,"assinaturas/${u.id}.png")
-                collectSignature("Assinatura cadastrada de ${u.name}",dest) { path ->
-                    store.saveRegisteredSignature(u.id,path); userManagement()
+        if(currentUser?.role!="ADMIN")return dashboard()
+        val body=screen("Gestão central de usuários","Contas e perfis no SERVIDOR02",::dashboard)
+        body.addView(label("Os cadastros são administrados no HUB e valem para todos os aparelhos. "+
+            "Não são criados usuários locais independentes.",12f))
+        val create=section(body,"Novo servidor")
+        val matricula=field(create,"Matrícula")
+        val fullName=field(create,"Nome completo")
+        val role=selector(create,"Função no sistema",listOf("agente","operador","leitura","admin"),"agente")
+        val initial=field(create,"Senha provisória (mínimo 8 caracteres, letra e número)",password=true)
+        val confirmation=field(create,"Confirmar senha provisória",password=true)
+        val listBox=section(body,"Servidores cadastrados")
+        fun reload(){
+            listBox.removeAllViews()
+            listBox.addView(label("Consultando contas no HUB...",12f))
+            HubAdmin.list(applicationContext){accounts,error->
+                if(!listBox.isAttachedToWindow)return@list
+                listBox.removeAllViews()
+                if(accounts==null){
+                    listBox.addView(label("Gestão indisponível: "+(error?:"sem conexão")+
+                        ". Os cadastros não foram modificados.",13f))
+                    return@list
                 }
-            })
-        }
-        val c = section(body,"Novo usuário")
-        val name = field(c,"Nome")
-        val mat = field(c,"Matrícula")
-        val password = field(c,"Senha inicial",password=true)
-        val confirmPassword = field(c,"Confirmar senha",password=true)
-        c.addView(label("Mínimo: 8 caracteres com maiúscula, minúscula, número e símbolo. A troca será exigida no primeiro login.", 12f))
-        val roles = arrayOf("AGENTE", "OPERADOR", "CONSULTA", "ADMIN")
-        val role = Spinner(this).apply {adapter = ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,roles)}
-        c.addView(label("Função",13f,true));c.addView(role)
-        c.addView(label("Permissões individuais (além de consultar todas as ocorrências)",13f,true))
-        val rightsBoxes = mutableMapOf<String, CheckBox>()
-        Rights.custom.forEach { right ->
-            val cb=CheckBox(this).apply { text=Rights.labels[right] ?: right; setTextColor(ink); isChecked=right in Rights.defaults("AGENTE") }
-            c.addView(cb);rightsBoxes[right]=cb
-        }
-        role.onItemSelectedListener=object: android.widget.AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent:android.widget.AdapterView<*>?,view:View?,position:Int,id:Long) {
-                val defaults=Rights.defaults(role.selectedItem.toString())
-                rightsBoxes.forEach{(right,checkbox)->checkbox.isChecked=right in defaults;checkbox.isEnabled=role.selectedItem.toString()!="ADMIN"}
+                if(accounts.isEmpty())listBox.addView(label("Nenhuma conta encontrada",13f))
+                accounts.forEach { user ->
+                    val panel=vertical().apply{
+                        background=shape(Color.rgb(245,248,253),10)
+                        setPadding(sp(10),sp(10),sp(10),sp(10))
+                    }
+                    panel.addView(label(user.nome+" • "+user.matricula,14f,true))
+                    panel.addView(label(user.perfil.uppercase()+" • "+
+                        (if(user.bloqueado)"BLOQUEADO" else "ATIVO"),11f))
+                    panel.addView(button("Editar nome e perfil",false){
+                        val editor=vertical().apply{setPadding(sp(12),sp(6),sp(12),0)}
+                        val edName=field(editor,"Nome completo",value=user.nome)
+                        val edRole=selector(editor,"Função",
+                            listOf("agente","operador","leitura","admin"),user.perfil)
+                        AlertDialog.Builder(this).setTitle("Editar matrícula "+user.matricula)
+                            .setView(editor).setNegativeButton("Cancelar",null)
+                            .setPositiveButton("Salvar"){_,_->
+                                val payload=JSONObject().put("action","update")
+                                    .put("full_name",edName.text.toString().trim())
+                                    .put("role",selected(edRole))
+                                HubAdmin.write(applicationContext,user.matricula,payload){failure->
+                                    if(failure!=null)toast(failure)
+                                    else{toast("Cadastro atualizado no HUB");HubDirectory.refresh(applicationContext);reload()}
+                                }
+                            }.show()
+                    })
+                    if(user.matricula!=currentUser?.matricula){
+                        panel.addView(button(if(user.bloqueado)"Reativar acesso" else "Bloquear acesso",false){
+                            AlertDialog.Builder(this).setTitle("Confirmar alteração")
+                                .setMessage((if(user.bloqueado)"Reativar " else "Bloquear ")+user.nome+"?")
+                                .setNegativeButton("Cancelar",null)
+                                .setPositiveButton("Confirmar"){_,_->
+                                    val payload=JSONObject().put("action",
+                                        if(user.bloqueado)"enable" else "disable")
+                                    HubAdmin.write(applicationContext,user.matricula,payload){failure->
+                                        if(failure!=null)toast(failure)
+                                        else{toast("Acesso atualizado no HUB");reload()}
+                                    }
+                                }.show()
+                        })
+                        panel.addView(button("Redefinir senha provisória",false){
+                            val editor=vertical().apply{setPadding(sp(12),sp(8),sp(12),0)}
+                            val edPass=field(editor,"Nova senha",password=true)
+                            val repeat=field(editor,"Confirme a nova senha",password=true)
+                            AlertDialog.Builder(this).setTitle("Redefinir senha de "+user.nome)
+                                .setView(editor).setNegativeButton("Cancelar",null)
+                                .setPositiveButton("Alterar"){_,_->
+                                    if(edPass.text.toString()!=repeat.text.toString()){
+                                        toast("As senhas são diferentes")
+                                    }else{
+                                        val payload=JSONObject().put("action","reset_password")
+                                            .put("password",edPass.text.toString())
+                                        HubAdmin.write(applicationContext,user.matricula,payload){failure->
+                                            if(failure!=null)toast(failure)
+                                            else{toast("Senha atualizada no HUB");reload()}
+                                        }
+                                    }
+                                }.show()
+                        })
+                    }
+                    listBox.addView(panel,LinearLayout.LayoutParams(-1,-2).apply{
+                        bottomMargin=sp(9)
+                    })
+                }
             }
-            override fun onNothingSelected(parent:android.widget.AdapterView<*>?) {}
         }
-        c.addView(button("Cadastrar usuário") {
-            if (password.text.toString() != confirmPassword.text.toString()) return@button toast("As senhas não coincidem")
-            try {
-                val u = store.createUser(name.text.toString(),mat.text.toString(),role.selectedItem.toString(),password.text.toString())
-                store.requirePasswordChange(u.id, currentUser!!.id)
-                store.setUserRights(u.id,rightsBoxes.filterValues { it.isChecked }.keys,currentUser!!.id)
-                toast("Usuário cadastrado: ${u.matricula}")
-                userManagement()
-            } catch (e: Exception) {toast(e.message ?: "Falha no cadastro")}
+        create.addView(button("Cadastrar no HUB"){
+            val password=initial.text.toString()
+            if(matricula.text.isBlank()||fullName.text.isBlank())return@button toast(
+                "Preencha matrícula e nome")
+            if(password!=confirmation.text.toString())return@button toast(
+                "As senhas não coincidem")
+            val payload=JSONObject().put("username",matricula.text.toString().trim())
+                .put("full_name",fullName.text.toString().trim())
+                .put("role",selected(role)).put("password",password)
+            HubAdmin.write(applicationContext,null,payload){failure->
+                if(failure!=null)toast(failure)
+                else{
+                    toast("Servidor cadastrado no HUB")
+                    matricula.setText("");fullName.setText("");initial.setText("")
+                    confirmation.setText("")
+                    HubDirectory.refresh(applicationContext)
+                    reload()
+                }
+            }
         })
+        reload()
     }
 
     private fun editUserScreen(userId: String) {
