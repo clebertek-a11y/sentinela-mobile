@@ -81,7 +81,7 @@ object ReportPdf {
             value.replace("\r","").split("\n").forEach { para ->
                 var line=""
                 para.split(" ").forEach { word ->
-                    val candidate=if(line.isEmpty())word else "$"+"line $"+ "word"
+                    val candidate=if(line.isEmpty())word else line+" "+word
                     if(pen.measureText(candidate)>maxWidth && line.isNotEmpty()){
                         res.add(line);line=word
                     } else line=candidate
