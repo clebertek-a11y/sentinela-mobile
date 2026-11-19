@@ -8,6 +8,8 @@ import android.database.sqlite.SQLiteOpenHelper
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.time.LocalDate
+import org.json.JSONArray
+import org.json.JSONObject
 import java.util.UUID
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
@@ -74,7 +76,19 @@ object Rights {
     }
 }
 
-class LocalStore(ctx: Context) : SQLiteOpenHelper(ctx, "sentinela_offline.db", null, 3) {
+/** Dados operacionais do BA recebidos pelo operador e editaveis pelo agente. */
+data class BAExtra(
+    val solicitanteCpf: String = "",
+    val tipoSolicitante: String = "",
+    val tipoAtendimento: String = "",
+    val responsavelTelefone: String = "",
+    val responsavelVinculo: String = "",
+    val tiposOcorrencia: String = "[]",
+    val servidores: String = "[]",
+    val enderecoComplemento: String = ""
+)
+
+class LocalStore(ctx: Context) : SQLiteOpenHelper(ctx, "sentinela_offline.db", null, 4) {
     private val prefs = ctx.getSharedPreferences("sentinela_prefs", Context.MODE_PRIVATE)
 
     override fun onCreate(db: SQLiteDatabase) {
@@ -116,6 +130,7 @@ class LocalStore(ctx: Context) : SQLiteOpenHelper(ctx, "sentinela_offline.db", n
         db.execSQL("ALTER TABLE users ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0")
         db.execSQL("CREATE INDEX idx_incidents_date ON incidents(date)")
         db.execSQL("CREATE INDEX idx_photos_incident ON photos(incident_id)")
+        createBaMeta(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -129,6 +144,51 @@ class LocalStore(ctx: Context) : SQLiteOpenHelper(ctx, "sentinela_offline.db", n
             db.execSQL("CREATE TABLE IF NOT EXISTS user_permissions(user_id TEXT NOT NULL, permission TEXT NOT NULL, allowed INTEGER NOT NULL, PRIMARY KEY(user_id,permission))")
             db.execSQL("CREATE TABLE IF NOT EXISTS incident_acceptances(incident_id TEXT NOT NULL, user_id TEXT NOT NULL, accepted_at TEXT NOT NULL, PRIMARY KEY(incident_id,user_id))")
             db.execSQL("ALTER TABLE users ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0")
+        }
+        if (oldVersion < 4) createBaMeta(db)
+    }
+
+    private fun createBaMeta(db: SQLiteDatabase) {
+        db.execSQL("""CREATE TABLE IF NOT EXISTS ba_meta(
+            incident_id TEXT PRIMARY KEY,
+            solicitante_cpf TEXT NOT NULL DEFAULT '',
+            tipo_solicitante TEXT NOT NULL DEFAULT '',
+            tipo_atendimento TEXT NOT NULL DEFAULT '',
+            responsavel_telefone TEXT NOT NULL DEFAULT '',
+            responsavel_vinculo TEXT NOT NULL DEFAULT '',
+            tipos_ocorrencia TEXT NOT NULL DEFAULT '[]',
+            servidores TEXT NOT NULL DEFAULT '[]',
+            endereco_complemento TEXT NOT NULL DEFAULT ''
+        )""")
+    }
+
+    fun baMeta(id: String): BAExtra = readableDatabase.rawQuery(
+        "SELECT solicitante_cpf,tipo_solicitante,tipo_atendimento,responsavel_telefone," +
+            "responsavel_vinculo,tipos_ocorrencia,servidores,endereco_complemento FROM ba_meta WHERE incident_id=?",
+        arrayOf(id)
+    ).use { c ->
+        if (!c.moveToFirst()) BAExtra()
+        else BAExtra(c.getString(0),c.getString(1),c.getString(2),c.getString(3),
+            c.getString(4),c.getString(5),c.getString(6),c.getString(7))
+    }
+
+    fun saveBaMeta(id: String, extra: BAExtra, author: String, syncedImport: Boolean = false) {
+        if (!syncedImport) require(hasRight(author,Rights.CREATE) ||
+            canOperate(id,author,Rights.BA)) { "Sem autorização para editar os dados do atendimento" }
+        val cv=ContentValues().apply {
+            put("incident_id", id);put("solicitante_cpf",extra.solicitanteCpf)
+            put("tipo_solicitante",extra.tipoSolicitante);put("tipo_atendimento",extra.tipoAtendimento)
+            put("responsavel_telefone",extra.responsavelTelefone)
+            put("responsavel_vinculo",extra.responsavelVinculo)
+            put("tipos_ocorrencia",extra.tiposOcorrencia)
+            put("servidores",extra.servidores)
+            put("endereco_complemento",extra.enderecoComplemento)
+        }
+        writableDatabase.insertWithOnConflict("ba_meta",null,cv,SQLiteDatabase.CONFLICT_REPLACE)
+        if (!syncedImport) {
+            writableDatabase.update("incidents",ContentValues().apply {
+                put("sync_state","PENDENTE");put("updated_at",now())
+            },"id=?",arrayOf(id))
         }
     }
 
