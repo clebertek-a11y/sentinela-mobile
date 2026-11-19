@@ -107,6 +107,14 @@ class MainActivity : Activity() {
     private val prefs by lazy { getSharedPreferences("sync_settings", Context.MODE_PRIVATE) }
 
     private var realtime: HubRealtime? = null
+    private var lastStaffRefresh=0L
+    private fun refreshInstitutionalAccount() {
+        val u=currentUser?:return
+        if(System.currentTimeMillis()-lastStaffRefresh<600_000L)return
+        lastStaffRefresh=System.currentTimeMillis()
+        HubDirectory.refresh(applicationContext)
+        HubSignature.sync(applicationContext,u.matricula)
+    }
     private var activeDraftSaver: (() -> Unit)? = null
     private val draftHandler = Handler(Looper.getMainLooper())
     private var draftJob: Runnable? = null
@@ -179,6 +187,7 @@ class MainActivity : Activity() {
     private fun beginForegroundSync() {
         if (foregroundSyncStarted || currentUser == null) return
         foregroundSyncStarted = true
+        refreshInstitutionalAccount()
         liveHandler.removeCallbacks(foregroundSyncTick)
         liveHandler.post(foregroundSyncTick)
         realtime=HubRealtime(applicationContext) { changed, revoked ->
@@ -373,6 +382,27 @@ class MainActivity : Activity() {
             val row=row()
             val n=field(section,"Nome do servidor",value=name)
             val m=field(section,"Matrícula do servidor",value=matricula)
+            if(!readOnly) {
+                m.addTextChangedListener(object:TextWatcher {
+                    private var query:Runnable?=null
+                    override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int){}
+                    override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int){
+                        query?.let{m.removeCallbacks(it)}
+                        val mat=s?.toString()?.trim().orEmpty()
+                        if(mat.length<3)return
+                        val job=Runnable{
+                            val found=HubDirectory.cached(this@MainActivity,mat)
+                            if(found!=null && m.text.toString().trim()==mat &&
+                                (n.text.isBlank() || n.text.toString()==name)) {
+                                n.setText(found.nome)
+                            }
+                        }
+                        query=job
+                        m.postDelayed(job,300L)
+                    }
+                    override fun afterTextChanged(s:Editable?){}
+                })
+            }
             if(!readOnly) {
                 section.addView(button("Remover servidor",false) {
                     container.removeView(section)
@@ -589,6 +619,21 @@ class MainActivity : Activity() {
         val body=screen("Minha área", "${u.name} • ${u.matricula}",::dashboard)
         val info=section(body,"Meu acesso")
         info.addView(label("Perfil: ${u.role}\nMatrícula: ${u.matricula}",14f))
+        val sig=store.userById(u.id)?.signaturePath.orEmpty()
+        info.addView(label(if(sig.isNotBlank() && File(sig).isFile)
+            "Assinatura institucional cadastrada" else "Assinatura institucional pendente",12f))
+        info.addView(button("Cadastrar / atualizar minha assinatura",false){
+            val target=File(File(filesDir,"assinaturas"),u.matricula+".png")
+            collectSignature("Minha assinatura institucional",target){path->
+                store.saveRegisteredSignature(u.id,path)
+                HubSignature.markPending(this,u.matricula)
+                HubSignature.sync(applicationContext,u.matricula){uploaded->
+                    toast(if(uploaded)"Assinatura atualizada no HUB" else
+                        "Assinatura salva neste celular; envio pendente")
+                }
+                profileScreen()
+            }
+        })
         info.addView(label("Permissões disponíveis: ${Rights.custom.filter { has(it) }.joinToString { Rights.labels[it] ?: it }}",12f))
         info.addView(button("Alterar minha senha", false) { changePasswordAtLogin(u) })
         info.addView(button("Sair da conta",false) { explicitLogout() })
