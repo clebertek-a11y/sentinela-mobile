@@ -1086,86 +1086,168 @@ class MainActivity : Activity() {
     }
 
     private fun reportScreen(id: String) {
-        val o = store.incident(id) ?: return dashboard()
-        val old = store.report(id)
-        val readonly = o.status == "Atendida" || !store.canOperate(id,currentUser!!.id,Rights.BA)
-        val body = screen("Boletim de Atendimento", "${o.number} • ${o.rua}", { openIncident(id) })
-        val c = section(body, "Dados do atendimento")
-        c.addView(label("Solicitante: ${o.solicitante}\nLocal: ${o.rua} — ${o.bairro}\nNatureza: ${o.tipo}", 13f))
-        val historico = field(c, "Histórico / constatações", value = old.historico)
-        val providencias = field(c, "Providências adotadas", value = old.providencias)
-        val responsavel = field(c, "Responsável presente no local",value=old.responsavel.ifBlank { o.solicitante })
-        val doc = field(c, "Documento do responsável (quando informado)", value = old.responsavelDocumento)
-        val outros = field(c, "Outros agentes (não assinam o BA)",value=old.outrosAgentes)
-        val gps = field(c, "Localização / observações de GPS",value=old.gps)
-        if(readonly) listOf(historico,providencias,responsavel,doc,outros,gps).forEach { it.isEnabled=false }
-        // Assinatura manuscrita livre no atendimento, como a do responsavel.
-        // A identidade do usuario que abriu o BA continua registrada na auditoria.
-        val signer = section(body, "Assinatura do agente no local")
-        signer.addView(label("O agente assina com o dedo na tela, sem precisar cadastrar a assinatura antes. Identifique quem esta assinando.",12f))
-        val mat = field(signer,"Matrícula do agente",
-            value=old.agenteMatricula.ifBlank { currentUser?.matricula.orEmpty() })
-        val agentNameField = field(signer,"Nome do agente",
-            value=old.agenteNome.ifBlank { currentUser?.name.orEmpty() })
-        if(readonly) { mat.isEnabled=false;agentNameField.isEnabled=false }
-        var agentSignature = old.agenteSignature
-        val agentLabel = label(if (agentSignature.isNotBlank() && File(agentSignature).exists())
-            "Assinatura manuscrita registrada" else "Assinatura pendente",12f)
+        val o=store.incident(id) ?: return dashboard()
+        val old=store.report(id)
+        val oldExtra=BAExtrasStore(store).get(id)
+        val readonly=o.status=="Atendida" || !store.canOperate(id,currentUser!!.id,Rights.BA)
+        val body=screen("Boletim de Atendimento","Protocolo: "+o.number+" • Dados editáveis", {openIncident(id)})
+        val dados=section(body,"Dados do solicitante — recebidos do operador")
+        val solicitante=field(dados,"Solicitante",value=o.solicitante)
+        val cpf=field(dados,"CPF do solicitante",value=oldExtra.solicitanteCpf)
+        val telefone=field(dados,"Telefone do solicitante",value=o.telefone)
+        val rua=field(dados,"Endereço (rua e número)",value=o.rua)
+        val bairro=field(dados,"Bairro",value=o.bairro)
+        val classificacao=section(body,"Tipo do solicitante e atendimento")
+        val tipoSolicitante=selector(classificacao,"Tipo do solicitante",
+            listOf("Proprietário","Inquilino","Vizinho","Parente","Outros"),oldExtra.tipoSolicitante)
+        val modalidade=selector(classificacao,"Atendimento",listOf("Emergencial","Preventiva"),oldExtra.tipoAtendimento)
+        val tipos=section(body,"Tipos de ocorrência — marque uma ou mais")
+        val selectedTypes=oldExtra.tiposOcorrencia.toMutableSet()
+        if (selectedTypes.isEmpty() && o.tipo.isNotBlank()) selectedTypes.add(o.tipo)
+        typeChecklist(tipos,selectedTypes)
+        val outroTipo=field(tipos,"Outros — informar tipo diferente",value=oldExtra.outroTipo)
+
+        val responsavelBox=section(body,"Responsável no momento da vistoria")
+        val responsavel=field(responsavelBox,"Nome do responsável",
+            value=old.responsavel.ifBlank { o.solicitante })
+        val doc=field(responsavelBox,"CPF / documento do responsável",value=old.responsavelDocumento)
+        val respTelefone=field(responsavelBox,"Telefone do responsável",value=oldExtra.responsavelTelefone)
+        val vinculo=field(responsavelBox,"Vínculo",value=oldExtra.responsavelVinculo)
+        if(!readonly) responsavelBox.addView(button("Mesmo que o solicitante",false) {
+            responsavel.setText(solicitante.text.toString())
+            doc.setText(cpf.text.toString())
+            respTelefone.setText(telefone.text.toString())
+            vinculo.setText("Próprio solicitante")
+        })
+
+        val historicoBox=section(body,"Histórico da vistoria")
+        historicoBox.addView(label("O histórico inicial do operador pode ser completado ou corrigido.",12f))
+        val historico=field(historicoBox,"Histórico / constatações",
+            value=old.historico.ifBlank { o.descricao })
+        val providencias=field(section(body,"Providências adotadas"),
+            "Providências adotadas",value=old.providencias)
+        val servidores=section(body,"Servidores responsáveis — editáveis")
+        val staff=staffEditor(servidores,oldExtra.servidores)
+        val outros=field(servidores,"Observações sobre outros agentes",value=old.outrosAgentes)
+        val gps=field(section(body,"Localização da ocorrência"),
+            "Coordenadas / precisão / horário de captura",value=old.gps)
+
+        val signer=section(body,"Assinatura manuscrita do agente")
+        val mat=field(signer,"Matrícula do agente",
+            value=old.agenteMatricula.ifBlank {currentUser?.matricula.orEmpty()})
+        val agentName=field(signer,"Nome do agente",
+            value=old.agenteNome.ifBlank {currentUser?.name.orEmpty()})
+        var agentSignature=old.agenteSignature
+        val agentLabel=label(if(agentSignature.isNotBlank() && File(agentSignature).exists())
+            "Assinatura registrada" else "Assinatura pendente",12f)
         signer.addView(agentLabel)
-        if (!readonly) signer.addView(button("Assinar na tela do celular",false) {
-            if (mat.text.toString().trim().isEmpty() || agentNameField.text.toString().trim().isEmpty()) {
-                return@button toast("Informe o nome e a matrícula do agente antes de assinar")
-            }
-            collectSignature("Assinatura de " + agentNameField.text.toString().trim(),
-                File(FileTools.dir(this,id),"assinatura_primeiro_agente.png")) { path ->
-                agentSignature = path
-                agentLabel.text = "Assinatura registrada • " + agentNameField.text.toString().trim()
+        if(!readonly)signer.addView(button("Assinar livremente na tela",false) {
+            if(mat.text.isBlank()||agentName.text.isBlank())
+                return@button toast("Informe nome e matrícula do agente")
+            collectSignature("Assinatura do agente",
+                File(FileTools.dir(this,id),"assinatura_agente.png")) { path ->
+                agentSignature=path;agentLabel.text="Assinatura registrada"
+                scheduleDraftSave()
             }
         })
-        var responsibleSignature = old.responsavelSignature
-        val resident = section(body, "Assinatura do responsável no local")
-        val residentLabel = label(if (responsibleSignature.isBlank()) "Pendente" else "Assinatura registrada",12f)
+        var responsibleSignature=old.responsavelSignature
+        val resident=section(body,"Assinatura do responsável no local")
+        val residentLabel=label(if(responsibleSignature.isNotBlank() && File(responsibleSignature).exists())
+            "Assinatura registrada" else "Assinatura pendente",12f)
         resident.addView(residentLabel)
-        if (!readonly) resident.addView(button("Coletar assinatura no celular",false) {
-            collectSignature("Assinatura do responsável", File(FileTools.dir(this,id),"assinatura_responsavel.png")) { path ->
-                responsibleSignature = path
-                residentLabel.text = "Assinatura registrada"
+        if(!readonly)resident.addView(button("Coletar assinatura na tela",false) {
+            collectSignature("Assinatura do responsável",
+                File(FileTools.dir(this,id),"assinatura_responsavel.png")) {path ->
+                responsibleSignature=path;residentLabel.text="Assinatura registrada"
+                scheduleDraftSave()
             }
         })
-        fun report(): Report = Report(id, historico.text.toString().trim(), providencias.text.toString().trim(),
-            responsavel.text.toString().trim(),doc.text.toString().trim(),mat.text.toString().trim(),
-            agentNameField.text.toString().trim(),agentSignature,responsibleSignature,outros.text.toString().trim(),gps.text.toString().trim(), LocalStore.now())
-        val photosBlock = section(body, "Registro fotográfico")
-        val photoCounter = label("${store.photos(id).size} fotografia(s) armazenada(s) neste aparelho", 13f)
-        photosBlock.addView(photoCounter)
-        if (!readonly && has(Rights.PHOTOS)) {
-            photosBlock.addView(button("Tirar fotografia") { saveDraft(report()); takePhoto(id) })
-            photosBlock.addView(button("Selecionar da galeria",false) { saveDraft(report()); choosePhoto(id) })
+
+        fun report(): Report = Report(id,historico.text.toString().trim(),
+            providencias.text.toString().trim(),responsavel.text.toString().trim(),
+            doc.text.toString().trim(),mat.text.toString().trim(),agentName.text.toString().trim(),
+            agentSignature,responsibleSignature,outros.text.toString().trim(),
+            gps.text.toString().trim(),LocalStore.now())
+
+        fun extras(): BAExtras = oldExtra.copy(
+            solicitanteCpf=cpf.text.toString().trim(),
+            tipoSolicitante=selected(tipoSolicitante),
+            tipoAtendimento=selected(modalidade),
+            tiposOcorrencia=selectedTypes.toList(),
+            outroTipo=outroTipo.text.toString().trim(),
+            responsavelTelefone=respTelefone.text.toString().trim(),
+            responsavelVinculo=vinculo.text.toString().trim(),
+            servidores=staffValues(staff))
+
+        fun saveAll(automatic: Boolean) {
+            if(readonly) return
+            val author=currentUser?.id ?: return
+            store.updateIncidentDetails(id,solicitante.text.toString().trim(),
+                telefone.text.toString().trim(),rua.text.toString().trim(),
+                bairro.text.toString().trim(),
+                selectedTypes.firstOrNull() ?: outroTipo.text.toString().trim(),
+                historico.text.toString(),author)
+            val extra=extras()
+            val extrasStore=BAExtrasStore(store)
+            if (extrasStore.get(id)!=extra) extrasStore.save(id,extra)
+            store.saveReport(report(),author,automatic)
+            scheduleSync()
         }
-        store.photos(id).forEachIndexed { ix, _ -> photosBlock.addView(label("Foto ${ix+1} — salva localmente", 12f)) }
-        val actions = section(body, "Gravação e conclusão")
-        if (!readonly) {
-            actions.addView(button("Salvar rascunho", false) { saveDraft(report()); toast("Rascunho salvo no aparelho") })
-            if(has(Rights.FINISH)) actions.addView(button("Salvar BA e finalizar ocorrência") {
-                val r = report()
-                if (r.historico.isBlank() || r.providencias.isBlank()) return@button toast("Preencha histórico e providências")
-                if (r.agenteSignature.isBlank() || !File(r.agenteSignature).exists()) return@button toast("Confirme a assinatura do primeiro agente")
-                if (r.responsavelSignature.isBlank() || !File(r.responsavelSignature).exists()) return@button toast("Colete a assinatura do responsável")
-                val photoList = store.photos(id)
-                if (photoList.isEmpty()) return@button toast("Envie pelo menos uma fotografia antes de finalizar")
-                try {
-                    saveDraft(r)
-                    val pdf = ReportPdf.generate(this, o, r, photoList)
-                    store.conclude(id,pdf.absolutePath,currentUser!!.id)
-                    val completed=store.incident(id) ?: error("Falha ao consultar a ocorrência concluída")
-                    TimelinePdf.generate(this,completed,store.auditEvents(id))
-                    FileTools.archive(this,completed,store.report(id),store.photos(id),store.auditEvents(id))
-                    scheduleSync()
-                    toast("BA e ocorrência concluídos localmente. Arquivamento remoto pendente.")
-                    openIncident(id)
-                } catch (e: Exception) { toast("Erro ao gerar BA: ${e.message}") }
+
+        val photosBlock=section(body,"Registro fotográfico")
+        photosBlock.addView(label("${store.photos(id).size} fotografia(s) armazenada(s) neste aparelho",13f))
+        if(!readonly && has(Rights.PHOTOS)) {
+            photosBlock.addView(button("Tirar fotografia") {saveAll(true);takePhoto(id)})
+            photosBlock.addView(button("Selecionar da galeria",false) {saveAll(true);choosePhoto(id)})
+        }
+        store.photos(id).forEachIndexed { ix,_ ->
+            photosBlock.addView(label("Foto ${ix+1} — salva localmente",12f))
+        }
+
+        if(readonly) {
+            listOf(solicitante,cpf,telefone,rua,bairro,outroTipo,responsavel,
+                doc,respTelefone,vinculo,historico,providencias,outros,gps,mat,agentName)
+                .forEach{it.isEnabled=false}
+            tipoSolicitante.isEnabled=false;modalidade.isEnabled=false
+        } else {
+            watchDraft(listOf(solicitante,cpf,telefone,rua,bairro,outroTipo,
+                responsavel,doc,respTelefone,vinculo,historico,providencias,
+                outros,gps,mat,agentName)) { saveAll(true) }
+        }
+
+        val actions=section(body,"Gravação e conclusão")
+        if(!readonly) {
+            actions.addView(label("Salvamento automático ativo • Rascunho local • Sincronização com o HUB",12f))
+            actions.addView(button("Salvar rascunho agora",false) {
+                try {saveAll(false);toast("Rascunho salvo no aparelho")}
+                catch(e:Exception){toast("Falha ao salvar: "+e.message)}
             })
-        } else actions.addView(label("Atendimento concluído. As alterações e novas assinaturas estão bloqueadas nesta versão.", 12f))
+            if(has(Rights.FINISH)) actions.addView(button("Finalizar atendimento e gerar BA") {
+                val r=report()
+                if(r.historico.isBlank()||r.providencias.isBlank())
+                    return@button toast("Preencha histórico e providências")
+                if(r.agenteSignature.isBlank()||!File(r.agenteSignature).exists())
+                    return@button toast("Colete assinatura do agente")
+                if(r.responsavelSignature.isBlank()||!File(r.responsavelSignature).exists())
+                    return@button toast("Colete assinatura do responsável")
+                val photoList=store.photos(id)
+                if(photoList.isEmpty()) return@button toast("Registre ao menos uma fotografia")
+                try {
+                    saveAll(false)
+                    val updated=store.incident(id) ?: o
+                    val pdf=ReportPdf.generate(this,updated,store.report(id),photoList)
+                    store.conclude(id,pdf.absolutePath,currentUser!!.id)
+                    val completed=store.incident(id) ?: error("Ocorrência não encontrada")
+                    TimelinePdf.generate(this,completed,store.auditEvents(id))
+                    FileTools.archive(this,completed,store.report(id),
+                        store.photos(id),store.auditEvents(id))
+                    activeDraftSaver=null
+                    scheduleSync()
+                    toast("BA gerado. Arquivamento no HUB aguardando confirmação.")
+                    openIncident(id)
+                } catch(e:Exception){toast("Falha ao gerar BA: "+(e.message ?: "verifique os dados"))}
+            })
+        } else actions.addView(label("Atendimento concluído. Documento disponível para consulta.",12f))
     }
 
     private fun saveDraft(r: Report) { store.saveReport(r, currentUser!!.id); scheduleSync() }
