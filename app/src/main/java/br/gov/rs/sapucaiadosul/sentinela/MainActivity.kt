@@ -38,6 +38,8 @@ import android.widget.*
 import java.io.File
 import java.io.FileOutputStream
 import java.time.LocalDate
+import org.json.JSONArray
+import org.json.JSONObject
 
 class MainActivity : Activity() {
     private lateinit var store: LocalStore
@@ -55,6 +57,58 @@ class MainActivity : Activity() {
     private var foregroundSyncStarted = false
     private var foregroundSyncInFlight = false
     private var refreshVisibleScreen: (() -> Unit)? = null
+    private var flushCurrentDraft: (() -> Unit)? = null
+    private val autosaveHandler=Handler(Looper.getMainLooper())
+    private val autosaveRunnable=Runnable { flushCurrentDraft?.invoke() }
+    private fun persistCurrentDraft() {
+        autosaveHandler.removeCallbacks(autosaveRunnable)
+        flushCurrentDraft?.invoke()
+        flushCurrentDraft=null
+    }
+    private fun autosaveSoon() {
+        autosaveHandler.removeCallbacks(autosaveRunnable)
+        autosaveHandler.postDelayed(autosaveRunnable,900L)
+    }
+    private fun watchForAutosave(vararg fields: EditText) {
+        fields.forEach { input ->
+            input.addTextChangedListener(object: TextWatcher {
+                override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int) {}
+                override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int) {autosaveSoon()}
+                override fun afterTextChanged(s:Editable?) {}
+            })
+        }
+    }
+    private fun addSelector(parent: LinearLayout, title: String, options: List<String>, value: String): Spinner {
+        parent.addView(label(title,13f,true))
+        val selector=Spinner(this)
+        val entries=listOf("Não informado")+options
+        selector.adapter=ArrayAdapter(this,android.R.layout.simple_spinner_dropdown_item,entries)
+        val idx=options.indexOf(value)
+        selector.setSelection(if(idx<0) 0 else idx+1)
+        parent.addView(selector)
+        return selector
+    }
+    private fun selectorValue(s:Spinner):String =
+        s.selectedItem?.toString()?.takeUnless{it=="Não informado"} ?: ""
+    private fun addTypeChooser(parent:LinearLayout, selected:MutableSet<String>):TextView {
+        val control=label("",13f,true,navy).apply {
+            background=shape(Color.rgb(235,241,249),10)
+            setPadding(sp(12),sp(13),sp(12),sp(13))
+        }
+        fun refresh() {control.text="Tipos de ocorrência: "+(if(selected.isEmpty())"Selecionar..." else selected.joinToString("; "))+"   ▾"}
+        refresh()
+        control.setOnClickListener {
+            val opts=OccurrenceCatalog.flat.toTypedArray()
+            val flags=opts.map{it in selected}.toBooleanArray()
+            AlertDialog.Builder(this).setTitle("Tipos de ocorrência (marque um ou mais)")
+                .setMultiChoiceItems(opts,flags){_,index,checked->
+                    if(checked)selected.add(opts[index]) else selected.remove(opts[index])
+                }.setPositiveButton("Confirmar"){_,_->refresh();autosaveSoon()}
+                .setNegativeButton("Cancelar",null).show()
+        }
+        parent.addView(control)
+        return control
+    }
     private val foregroundSyncTick = object : Runnable {
         override fun run() {
             if (!foregroundSyncStarted || currentUser == null) return
@@ -102,6 +156,7 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() {
+        persistCurrentDraft()
         stopForegroundSync()
         super.onPause()
     }
@@ -118,7 +173,16 @@ class MainActivity : Activity() {
         store = LocalStore(this)
         HubConfig.ensure(this)
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-        showLogin()
+        val savedAccount=prefs.getString("hub_user","").orEmpty()
+        val savedSecret=SecureSecrets.read(this)
+        val previous=if(savedAccount.isNotBlank() && savedSecret.isNotBlank() &&
+            prefs.getBoolean("hub_verified_"+savedAccount,false))
+            store.userByMatricula(savedAccount) else null
+        if(previous!=null && previous.active) {
+            currentUser=previous
+            dashboard()
+            beginForegroundSync()
+        } else showLogin()
         if (prefs.contains("hub_user")) { SyncJobService.periodic(this); scheduleSync() }
         checkForUpdates(false)
     }
@@ -233,6 +297,7 @@ class MainActivity : Activity() {
     }
 
     private fun screen(title: String, subtitle: String = "", back: (() -> Unit)? = null): LinearLayout {
+        persistCurrentDraft()
         refreshVisibleScreen = null
         val root = vertical().apply { setBackgroundColor(bg) }
         val header = vertical().apply {
@@ -303,6 +368,7 @@ class MainActivity : Activity() {
     }
 
     private fun openingScreen(title: String, sub: String): LinearLayout {
+        persistCurrentDraft()
         refreshVisibleScreen = null
         val shell = vertical().apply { setBackgroundColor(darkBg) }
         val scroll = ScrollView(this).apply { isFillViewport = true }
@@ -355,7 +421,7 @@ class MainActivity : Activity() {
         info.addView(label("Perfil: ${u.role}\nMatrícula: ${u.matricula}",14f))
         info.addView(label("Permissões disponíveis: ${Rights.custom.filter { has(it) }.joinToString { Rights.labels[it] ?: it }}",12f))
         info.addView(button("Alterar minha senha", false) { changePasswordAtLogin(u) })
-        info.addView(button("Sair da conta",false) {showLogin()})
+        info.addView(button("Sair da conta",false) {logout()})
     }
 
     private fun reportsScreen() {
@@ -372,6 +438,7 @@ class MainActivity : Activity() {
     }
 
     private fun caseListScreen() {
+        persistCurrentDraft()
         refreshVisibleScreen = null
         val user=currentUser?:return showLogin()
         val root=vertical().apply {setBackgroundColor(darkBg)}
@@ -458,7 +525,15 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun logout() {
+        persistCurrentDraft()
+        stopForegroundSync()
+        prefs.edit().remove("hub_user").commit()
+        SecureSecrets.clear(this)
+        showLogin()
+    }
     private fun showLogin() {
+        persistCurrentDraft()
         stopForegroundSync()
         currentUser = null
         val body = screen("Acesso operacional", "SIGOPE e Boletim de Atendimento em um único aplicativo")
@@ -604,6 +679,7 @@ class MainActivity : Activity() {
 
     /** Tela operacional: dados reais deste aparelho, visual inspirado no layout aprovado. */
     private fun dashboard() {
+        persistCurrentDraft()
         refreshVisibleScreen = null
         val user = currentUser ?: return showLogin()
         if (!user.active) return showLogin()
