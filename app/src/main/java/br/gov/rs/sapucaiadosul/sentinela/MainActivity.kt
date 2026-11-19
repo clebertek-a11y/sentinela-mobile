@@ -56,6 +56,7 @@ class MainActivity : Activity() {
     private val liveHandler = Handler(Looper.getMainLooper())
     private var foregroundSyncStarted = false
     private var foregroundSyncInFlight = false
+    private var hubEvents:HubLiveEvents?=null
     private var refreshVisibleScreen: (() -> Unit)? = null
     private var flushCurrentDraft: (() -> Unit)? = null
     private val autosaveHandler=Handler(Looper.getMainLooper())
@@ -117,6 +118,11 @@ class MainActivity : Activity() {
             SyncJobService.nowResult(applicationContext) { result, error ->
                 foregroundSyncInFlight = false
                 if (!foregroundSyncStarted || isFinishing || isDestroyed || currentUser == null) return@nowResult
+                if(error?.contains("Servidor HTTP 401")==true){
+                    logout()
+                    toast("Acesso encerrado pelo HUB. Faça login novamente.")
+                    return@nowResult
+                }
                 if (result != null && (result.received > 0 || result.sent > 0)) {
                     // Nunca desmontar formulario de atendimento em preenchimento.
                     // As telas de lista sao atualizadas automaticamente.
@@ -132,11 +138,22 @@ class MainActivity : Activity() {
     private fun beginForegroundSync() {
         if (foregroundSyncStarted || currentUser == null) return
         foregroundSyncStarted = true
+        hubEvents=HubLiveEvents(applicationContext) {
+            if(foregroundSyncStarted && !foregroundSyncInFlight) {
+                foregroundSyncInFlight=true
+                SyncJobService.nowResult(applicationContext){result,_->
+                    foregroundSyncInFlight=false
+                    if(foregroundSyncStarted && result!=null &&
+                        (result.received>0 || result.sent>0))refreshVisibleScreen?.invoke()
+                }
+            }
+        }.also{it.start()}
         liveHandler.removeCallbacks(foregroundSyncTick)
         liveHandler.post(foregroundSyncTick)
     }
 
     private fun stopForegroundSync() {
+        hubEvents?.stop();hubEvents=null
         foregroundSyncStarted = false
         liveHandler.removeCallbacks(foregroundSyncTick)
     }
