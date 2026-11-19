@@ -342,7 +342,13 @@ class HubSyncEngine(private val context: Context) {
                     throw IllegalStateException("Hash de anexo invalido")
                 if(!temp.renameTo(output))
                     throw IllegalStateException("Nao foi possivel salvar anexo remoto")
-                if(ext in setOf("jpg","jpeg","png","webp")) {
+                if(ext=="png"&&name.contains("assinatura_agente",true)) {
+                    db.execSQL("UPDATE reports SET agente_signature=? WHERE incident_id=? AND agente_signature=''",
+                        arrayOf(output.absolutePath,incidentId))
+                } else if(ext=="png"&&name.contains("assinatura_responsavel",true)) {
+                    db.execSQL("UPDATE reports SET responsavel_signature=? WHERE incident_id=? AND responsavel_signature=''",
+                        arrayOf(output.absolutePath,incidentId))
+                } else if(ext in setOf("jpg","jpeg","png","webp")) {
                     val values=ContentValues().apply {
                         put("id","hub-"+id);put("incident_id",incidentId)
                         put("path",output.absolutePath);put("original_path",output.absolutePath)
@@ -351,9 +357,6 @@ class HubSyncEngine(private val context: Context) {
                     db.insertWithOnConflict("photos",null,values,SQLiteDatabase.CONFLICT_IGNORE)
                 } else if(ext=="pdf"&&name.startsWith("BA",ignoreCase=true)) {
                     db.execSQL("UPDATE incidents SET pdf_path=? WHERE id=? AND pdf_path=''",
-                        arrayOf(output.absolutePath,incidentId))
-                } else if(ext=="png"&&name.contains("assinatura_agente",true)) {
-                    db.execSQL("UPDATE reports SET agente_signature=? WHERE incident_id=? AND agente_signature=''",
                         arrayOf(output.absolutePath,incidentId))
                 }
                 db.execSQL("INSERT OR REPLACE INTO hub_remote_files(file_id,incident_id,local_path) VALUES(?,?,?)",
