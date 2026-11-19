@@ -30,6 +30,7 @@ object HubAuth {
                             val role=when(who.optString("role","leitura").lowercase()) {
                                 "admin" -> "ADMIN"
                                 "operador" -> "OPERADOR"
+                                "agente" -> "AGENTE"
                                 else -> "CONSULTA"
                             }
                             Pair(Identity(who.optString("username",user),
