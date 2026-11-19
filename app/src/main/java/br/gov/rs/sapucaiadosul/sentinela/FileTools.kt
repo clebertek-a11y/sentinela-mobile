@@ -18,15 +18,12 @@ import org.json.JSONObject
 object FileTools {
     fun dir(ctx: Context, incidentId: String): File = File(ctx.filesDir, "atendimentos/$incidentId").apply { mkdirs() }
 
-    /** Mantém a imagem original privativamente e gera cópia JPEG de alta qualidade para sincronização. */
+    /** Otimiza a foto para o HUB sem duplicar no app o original que já existe na origem. */
     fun importPhoto(ctx: Context, incidentId: String, uri: Uri): Pair<File, File> {
         val folder = File(dir(ctx, incidentId), "fotos").apply { mkdirs() }
         val name = UUID.randomUUID().toString()
-        val original = File(folder, "${name}_original.bin")
-        ctx.contentResolver.openInputStream(uri).use { input ->
-            requireNotNull(input) { "Não foi possível abrir a imagem" }
-            FileOutputStream(original).use { out -> input.copyTo(out) }
-        }
+        // Não duplicar o original: câmera e galeria preservam a imagem na origem.
+        // O app mantém somente a cópia otimizada, que será arquivada no HUB.
         // ImageDecoder respeita a orientação EXIF das fotos em Android moderno.
         val source = ImageDecoder.createSource(ctx.contentResolver, uri)
         val bitmap = ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
@@ -45,7 +42,7 @@ object FileTools {
             check(bitmap.compress(Bitmap.CompressFormat.JPEG, 85, output)) { "Falha na compactação" }
         }
         bitmap.recycle()
-        return optimized to original
+        return optimized to optimized
     }
 
     /** ZIP autocontido, com manifesto e cópias de fotos e PDF. Nunca apaga originais. */
