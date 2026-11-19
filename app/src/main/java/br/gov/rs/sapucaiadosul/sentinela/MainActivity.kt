@@ -953,7 +953,17 @@ class MainActivity : Activity() {
             .setMessage("Seu nome e matrícula serão registrados no histórico. A equipe originalmente designada será preservada. Depois de aceitar, você poderá iniciar o deslocamento e o atendimento conforme suas permissões.")
             .setNegativeButton("Cancelar",null)
             .setPositiveButton("Aceitar") {_,_->
-                try {store.acceptIncident(id,currentUser!!.id);scheduleSync();toast("Atendimento aceito");openIncident(id)}
+                try {
+                    val actor=currentUser ?: error("Usuário não autenticado")
+                    store.acceptIncident(id,actor.id)
+                    val extrasStore=BAExtrasStore(store)
+                    val previous=extrasStore.get(id)
+                    val name=actor.name+" ("+actor.matricula+")"
+                    extrasStore.save(id,previous.copy(aceites=(previous.aceites+name).distinct()))
+                    scheduleSync()
+                    toast("Atendimento aceito")
+                    openIncident(id)
+                }
                 catch(e:Exception){toast(e.message?:"Não foi possível aceitar")}
             }.show()
     }
@@ -1050,7 +1060,7 @@ class MainActivity : Activity() {
         c.addView(label("${o.rua} — ${o.bairro}",17f,true))
         c.addView(label("Solicitante: ${o.solicitante}\nTelefone: ${o.telefone}\nNatureza: ${o.tipo}\nPrioridade: ${o.prioridade}\nEquipe designada: ${o.equipe.ifBlank { "Não informada" }}\n${o.descricao}",13f))
         if(has(Rights.MAP)) c.addView(button("Abrir endereço no mapa",false){goToMaps(o)})
-        val participants=store.acceptanceNames(id)
+        val participants=(store.acceptanceNames(id)+BAExtrasStore(store).get(id).aceites).distinct()
         val stage=section(body,"Participação e desdobramentos")
         stage.addView(label("Agentes que aceitaram: ${if(participants.isEmpty()) "Nenhum" else participants.joinToString()}\nEquipe designada: ${o.equipe.ifBlank { "Não informada" }}",13f))
         val mine=store.hasAccepted(id,u.id)
