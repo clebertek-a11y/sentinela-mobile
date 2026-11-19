@@ -203,6 +203,8 @@ class LocalStore(ctx: Context) : SQLiteOpenHelper(ctx, "sentinela_offline.db", n
             db.insertWithOnConflict("incident_acceptances",null,ContentValues().apply {
                 put("incident_id",incidentId);put("user_id",userId);put("accepted_at",now())
             },SQLiteDatabase.CONFLICT_IGNORE)
+            db.execSQL("UPDATE incidents SET sync_state='PENDENTE',updated_at=? WHERE id=?",
+                arrayOf(now(),incidentId))
             logAction(db,incidentId,"Atendimento aceito por ${userById(userId)?.matricula}",userId)
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
@@ -460,6 +462,34 @@ class LocalStore(ctx: Context) : SQLiteOpenHelper(ctx, "sentinela_offline.db", n
         getString(6), getString(7), getString(8), getString(9), getString(10), getString(11),
         getString(12), getString(13), getString(14)
     )
+
+    /**
+     * Correcao de campos do operador durante a vistoria, sem descartar o historico.
+     * A rota de sincronizacao transmitira os novos dados em seguida.
+     */
+    fun updateIncidentDetails(
+        id: String, solicitante: String, telefone: String,
+        rua: String, bairro: String, tipo: String, descricao: String, author: String
+    ) {
+        require(canOperate(id,author,Rights.BA)) { "Aceite a ocorrencia antes de editar o BA" }
+        val old=incident(id) ?: error("Ocorrencia inexistente")
+        require(old.status!="Atendida") { "Boletim ja concluido" }
+        require(solicitante.isNotBlank() && rua.isNotBlank()) { "Solicitante e endereco obrigatorios" }
+        if (listOf(old.solicitante,old.telefone,old.rua,old.bairro,old.tipo,old.descricao) ==
+            listOf(solicitante,telefone,rua,bairro,tipo,descricao)) return
+        val cv=ContentValues().apply {
+            put("solicitante",solicitante);put("telefone",telefone)
+            put("rua",rua);put("bairro",bairro);put("tipo",tipo);put("descricao",descricao)
+            put("sync_state","PENDENTE");put("updated_at",now())
+        }
+        val db=writableDatabase
+        db.beginTransaction()
+        try {
+            db.update("incidents",cv,"id=?",arrayOf(id))
+            logAction(db,id,"Dados cadastrais da ocorrencia revisados no BA",author)
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
 
     fun updateStatus(id: String, status: String, author: String) {
         require(status in setOf("Aguardando atendimento", "Equipe deslocada", "Em atendimento", "Aguardando apoio", "Aguardando retorno", "Atendida"))
