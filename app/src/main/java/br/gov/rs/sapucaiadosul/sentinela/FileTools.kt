@@ -34,15 +34,15 @@ object FileTools {
             decoder.isMutableRequired = false
             val size = info.size
             val maxEdge = maxOf(size.width, size.height)
-            if (maxEdge > 3000) {
-                val ratio = 3000.0 / maxEdge
+            if (maxEdge > 2048) {
+                val ratio = 2048.0 / maxEdge
                 decoder.setTargetSize((size.width * ratio).toInt().coerceAtLeast(1),
                     (size.height * ratio).toInt().coerceAtLeast(1))
             }
         }
         val optimized = File(folder, "$name.jpg")
         FileOutputStream(optimized).use { output ->
-            check(bitmap.compress(Bitmap.CompressFormat.JPEG, 92, output)) { "Falha na compactação" }
+            check(bitmap.compress(Bitmap.CompressFormat.JPEG, 85, output)) { "Falha na compactação" }
         }
         bitmap.recycle()
         return optimized to original
