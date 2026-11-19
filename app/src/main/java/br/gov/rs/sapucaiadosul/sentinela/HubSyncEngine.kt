@@ -4,6 +4,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import java.io.File
+import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
@@ -33,6 +34,10 @@ class HubSyncEngine(private val context: Context) {
             payload_hash TEXT NOT NULL DEFAULT '', mutation_id TEXT NOT NULL DEFAULT '',
             conflict_json TEXT NOT NULL DEFAULT ''
         )""")
+        db.execSQL("""CREATE TABLE IF NOT EXISTS hub_remote_files(
+            file_id TEXT PRIMARY KEY, incident_id TEXT NOT NULL,
+            local_path TEXT NOT NULL
+        )""")
     }
 
     fun run(): Result = synchronized(lock) {
@@ -49,6 +54,7 @@ class HubSyncEngine(private val context: Context) {
         var received = 0
         var attachments = 0
         var conflicts = 0
+        val touched=mutableSetOf<String>()
 
         // Enviar primeiro: preserva versoes e identifica edicoes concorrentes.
         for (item in store.incidents().filter { it.syncState == "PENDENTE" }) {
@@ -96,6 +102,7 @@ class HubSyncEngine(private val context: Context) {
                     val remote = changes.getJSONObject(i)
                     if (remote.optString("collection") != "ocorrencias") continue
                     val id = remote.getString("id")
+                    touched.add(id)
                     val version = remote.getLong("version")
                     val local = store.incident(id)
                     val known = meta(id).first
@@ -126,6 +133,13 @@ class HubSyncEngine(private val context: Context) {
             cursor = response.getLong("cursor")
             if (!prefs.edit().putLong("hub_cursor", cursor).commit()) error("Falha ao salvar cursor")
             if (!response.optBoolean("has_more", false)) break
+        }
+        // As fotos e PDFs podem chegar segundos depois da mudanca do registro.
+        // Conferir tambem as 5 ocorrencias mais recentes, sem baixar repetidos.
+        val candidates=(touched+store.incidents().take(5).map { it.id }).distinct()
+        for (incidentId in candidates) {
+            try { attachments+=downloadRemoteFiles(incidentId,token) }
+            catch (_:Exception) { /* retry na proxima sincronizacao sem perder dados */ }
         }
         Result(sent, received, attachments, conflicts)
     }
@@ -276,6 +290,79 @@ class HubSyncEngine(private val context: Context) {
             sent++
         }
         return sent
+    }
+
+    private fun downloadRemoteFiles(incidentId: String, token: String): Int {
+        val response=request("GET",
+            "/api/v1/files?occurrence_id="+java.net.URLEncoder.encode(incidentId,"UTF-8"),
+            null,token)
+        val arr=response.optJSONArray("files") ?: return 0
+        var downloaded=0
+        for(i in 0 until arr.length()) {
+            val item=arr.optJSONObject(i) ?: continue
+            val id=item.optString("id")
+            val name=item.optString("name")
+            val checksum=item.optString("sha256")
+            if(!id.matches(Regex("[0-9a-f]{32}"))) continue
+            if(db.rawQuery("SELECT 1 FROM hub_remote_files WHERE file_id=?",arrayOf(id))
+                    .use{it.moveToFirst()})continue
+            val ext=name.substringAfterLast('.', "").lowercase()
+            if(ext !in setOf("jpg","jpeg","png","webp","pdf","txt","docx","xlsx"))continue
+            val localFiles=store.photos(incidentId).map{File(it.path)}+
+                listOfNotNull(store.incident(incidentId)?.pdfPath?.takeIf{it.isNotBlank()}?.let{File(it)})+
+                listOf(store.report(incidentId).agenteSignature,store.report(incidentId).responsavelSignature)
+                    .filter{it.isNotBlank()}.map{File(it)}
+            if(checksum.isNotBlank()&&localFiles.any{it.isFile&&sha256(it)==checksum}) {
+                db.execSQL("INSERT OR IGNORE INTO hub_remote_files(file_id,incident_id,local_path) VALUES(?,?,?)",
+                    arrayOf(id,incidentId,"ORIGINAL"))
+                continue
+            }
+            val folder=File(FileTools.dir(context,incidentId),"recebidos").apply{mkdirs()}
+            val output=File(folder,id+"."+ext)
+            val temp=File(folder,id+".tmp")
+            val conn=URL(base+"/api/v1/files/"+id).openConnection() as HttpURLConnection
+            try {
+                conn.connectTimeout=12000;conn.readTimeout=60000
+                conn.setRequestProperty("Authorization","Bearer "+token)
+                val status=conn.responseCode
+                if(status !in 200..299) continue
+                var total=0L
+                conn.inputStream.use { input ->
+                    FileOutputStream(temp).use { out ->
+                        val buf=ByteArray(65536)
+                        while(true){
+                            val n=input.read(buf);if(n<0)break
+                            total+=n
+                            if(total>16L*1024*1024)throw IllegalStateException("Arquivo remoto muito grande")
+                            out.write(buf,0,n)
+                        }
+                    }
+                }
+                if(checksum.isNotBlank()&&sha256(temp)!=checksum)
+                    throw IllegalStateException("Hash de anexo invalido")
+                if(!temp.renameTo(output))
+                    throw IllegalStateException("Nao foi possivel salvar anexo remoto")
+                if(ext in setOf("jpg","jpeg","png","webp")) {
+                    val values=ContentValues().apply {
+                        put("id","hub-"+id);put("incident_id",incidentId)
+                        put("path",output.absolutePath);put("original_path",output.absolutePath)
+                        put("created_at",item.optString("created_at",LocalStore.now()))
+                    }
+                    db.insertWithOnConflict("photos",null,values,SQLiteDatabase.CONFLICT_IGNORE)
+                } else if(ext=="pdf"&&name.startsWith("BA",ignoreCase=true)) {
+                    db.execSQL("UPDATE incidents SET pdf_path=? WHERE id=? AND pdf_path=''",
+                        arrayOf(output.absolutePath,incidentId))
+                } else if(ext=="png"&&name.contains("assinatura_agente",true)) {
+                    db.execSQL("UPDATE reports SET agente_signature=? WHERE incident_id=? AND agente_signature=''",
+                        arrayOf(output.absolutePath,incidentId))
+                }
+                db.execSQL("INSERT OR REPLACE INTO hub_remote_files(file_id,incident_id,local_path) VALUES(?,?,?)",
+                    arrayOf(id,incidentId,output.absolutePath))
+                downloaded++
+            } catch(_:Exception) {temp.delete()}
+            finally {conn.disconnect()}
+        }
+        return downloaded
     }
 
     private fun upload(item: Incident, file: File, token: String) {
