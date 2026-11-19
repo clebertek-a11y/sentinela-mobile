@@ -146,25 +146,29 @@ object ReportPdf {
         try {
             startPage()
             rect(0f,0f,W.toFloat(),138f,BLUE)
-            // Identidade institucional. O brasao municipal sera mantido em
-            // recurso especifico quando homologado pela Prefeitura.
+            // Brasao e logotipo extraidos do modelo institucional fornecido.
             rect(44f,28f,81f,81f,Color.WHITE)
-            p("",9f,true,BLUE)
-            cv.drawText("PREFEITURA",53f,63f,pen)
-            p("",8.5f,false,BLUE)
-            cv.drawText("Sapucaia do Sul",48f,80f,pen)
             rect(470f,28f,81f,81f,Color.WHITE)
-            val logo=BitmapFactory.decodeResource(ctx.resources,R.drawable.defesa_civil_logo)
+            val cityLogo=BitmapFactory.decodeResource(ctx.resources,R.drawable.ba_prefeitura)
+            if(cityLogo!=null) {
+                cv.drawBitmap(cityLogo,null,RectF(47f,31f,122f,106f),
+                    Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+                cityLogo.recycle()
+            }
+            val logo=BitmapFactory.decodeResource(ctx.resources,R.drawable.ba_defesa_civil)
             if(logo!=null) {
-                cv.drawBitmap(logo,null,RectF(478f,34f,543f,103f),
+                cv.drawBitmap(logo,null,RectF(473f,31f,548f,106f),
                     Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
                 logo.recycle()
             }
-            p("",10f,false,Color.WHITE)
-            cv.drawText("COORDENADORIA MUNICIPAL DE PROTEÇÃO E DEFESA CIVIL",138f,36f,pen)
-            cv.drawText("SAPUCAIA DO SUL - RS",224f,50f,pen)
+            p("",9.5f,false,Color.WHITE)
+            val entity="COORDENADORIA MUNICIPAL DE PROTEÇÃO E DEFESA CIVIL"
+            cv.drawText(entity,(W-pen.measureText(entity))/2f,36f,pen)
+            val city="SAPUCAIA DO SUL - RS"
+            cv.drawText(city,(W-pen.measureText(city))/2f,50f,pen)
             p("",19f,true,Color.WHITE)
-            cv.drawText("BOLETIM DE ATENDIMENTO",155f,80f,pen)
+            val title="BOLETIM DE ATENDIMENTO"
+            cv.drawText(title,(W-pen.measureText(title))/2f,80f,pen)
             rect(204f,95f,187f,26f,ORANGE)
             p("",11f,true,Color.WHITE)
             cv.drawText("Protocolo: "+o.number.take(34),211f,113f,pen)
