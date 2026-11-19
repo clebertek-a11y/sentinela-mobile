@@ -356,6 +356,32 @@ class MainActivity : Activity() {
      * Reserva a area indicada por WindowInsets.Type.ime para que o ScrollView
      * leve o campo de texto em foco para uma posicao visivel.
      */
+    /**
+     * Android 15 desenha atras da barra de gestos. A margem inferior segue
+     * os WindowInsets reais, e a navegacao desaparece quando abre o teclado.
+     * Chamado em todas as telas com barra inferior.
+     */
+    private fun safeBottomNavigation(root: View, navigation: View?) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val initialBottom=root.paddingBottom
+            root.setOnApplyWindowInsetsListener { view, insets ->
+                val bars=insets.getInsets(WindowInsets.Type.navigationBars()).bottom
+                val keyboard=insets.getInsets(WindowInsets.Type.ime()).bottom
+                val keyboardOpen=insets.isVisible(WindowInsets.Type.ime())
+                navigation?.visibility=if(keyboardOpen) View.GONE else View.VISIBLE
+                val bottom=initialBottom+maxOf(bars,if(keyboardOpen)keyboard else 0)
+                if(view.paddingBottom!=bottom) view.setPadding(
+                    view.paddingLeft,view.paddingTop,view.paddingRight,bottom)
+                insets
+            }
+            root.requestApplyInsets()
+        } else {
+            val densityBottom=sp(18)
+            root.setPadding(root.paddingLeft,root.paddingTop,root.paddingRight,
+                root.paddingBottom+densityBottom)
+        }
+    }
+
     private fun keyboardSafeScroll(scroll: ScrollView) {
         scroll.isFillViewport = true
         scroll.clipToPadding = false
@@ -464,6 +490,7 @@ class MainActivity : Activity() {
         scroll.addView(content)
         shell.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(shell)
+        safeBottomNavigation(shell,null)
         return content
     }
 
@@ -492,6 +519,7 @@ class MainActivity : Activity() {
             bar.addView(cell, LinearLayout.LayoutParams(0, -2, 1f))
         }
         root.addView(bar, LinearLayout.LayoutParams(-1,-2).apply {setMargins(sp(7),sp(6),sp(7),sp(8))})
+        safeBottomNavigation(root,bar)
     }
 
     private fun goToMaps(o: Incident) {
