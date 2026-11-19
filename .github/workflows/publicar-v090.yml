@@ -36,6 +36,12 @@ jobs:
           for name in ("BAExtras.kt","HubRealtime.kt","HubSyncEngine.kt","ReportPdf.kt","HubDirectory.kt","HubSignature.kt","HubAdmin.kt","StorageCleaner.kt"):
               assert (Path("app/src/main/java/br/gov/rs/sapucaiadosul/sentinela")/name).exists()
           PY
+      - name: Validar correcoes de acessibilidade, GPS e assinatura
+        run: |
+          grep -Fq 'safeBottomNavigation' app/src/main/java/br/gov/rs/sapucaiadosul/sentinela/MainActivity.kt
+          grep -Fq 'fillGps' app/src/main/java/br/gov/rs/sapucaiadosul/sentinela/MainActivity.kt
+          grep -Fq 'HubSignature' app/src/main/java/br/gov/rs/sapucaiadosul/sentinela/MainActivity.kt
+          grep -Fq 'StorageCleaner' app/src/main/java/br/gov/rs/sapucaiadosul/sentinela/MainActivity.kt
       - name: Compilar APK do piloto
         run: gradle --no-daemon --stacktrace :app:assembleDebug
       - name: Validar assinatura, numero da versao e integridade
