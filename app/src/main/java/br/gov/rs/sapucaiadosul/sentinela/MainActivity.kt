@@ -1334,7 +1334,9 @@ class MainActivity : Activity() {
             val finalMat=first?.matricula?.ifBlank{firstMat}?:firstMat
             val finalName=first?.nome?.ifBlank{firstName}?:firstName
             // Se mudou o primeiro agente, a assinatura anterior não é reutilizada.
-            val signed=agentSignature.takeIf{finalMat==firstMat && ownFirst}.orEmpty()
+            val signed=agentSignature.takeIf{
+                finalMat==firstMat && (ownFirst || old.agenteMatricula==firstMat)
+            }.orEmpty()
             return Report(id,historico.text.toString().trim(),
                 providencias.text.toString().trim(),responsavel.text.toString().trim(),
                 doc.text.toString().trim(),finalMat,finalName,
@@ -1480,7 +1482,8 @@ class MainActivity : Activity() {
             try {
                 val (compressed, original) = FileTools.importPhoto(this,id,uri)
                 store.addPhoto(id,compressed.absolutePath,original.absolutePath,currentUser!!.id)
-                toast("Foto salva localmente. Cópia original preservada.")
+                scheduleSync()
+                toast("Foto otimizada e salva. Envio automático solicitado.")
             } catch (e: Exception) { toast("Não foi possível importar imagem: ${e.message}") }
         }
         reportScreen(id)
