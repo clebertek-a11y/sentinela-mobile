@@ -1,5 +1,12 @@
 package br.gov.rs.sapucaiadosul.sentinela
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
+import java.util.Locale
+import java.text.SimpleDateFormat
 import android.app.Activity
 import android.app.AlertDialog
 import android.app.KeyguardManager
@@ -46,6 +53,53 @@ class MainActivity : Activity() {
     private var currentUser: User? = null
     private var attachmentIncidentId: String? = null
     private var cameraUri: Uri? = null
+    private var pendingGpsField:EditText?=null
+    private fun fillGps(target:EditText){
+        val fine=checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)==PackageManager.PERMISSION_GRANTED
+        val coarse=checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)==PackageManager.PERMISSION_GRANTED
+        if(!fine && !coarse){
+            pendingGpsField=target
+            requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION),901)
+            return
+        }
+        val manager=getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        val provider=when{
+            fine && manager.isProviderEnabled(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
+            manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) -> LocationManager.NETWORK_PROVIDER
+            else -> null
+        }
+        if(provider==null)return toast("Ative a localização do celular e tente novamente")
+        fun applyLocation(location:Location?){
+            if(location==null)return toast("Localização não disponível. Tente em área aberta.")
+            val captured=SimpleDateFormat("dd/MM/yyyy HH:mm:ss",Locale("pt","BR"))
+                .format(java.util.Date(location.time))
+            val result=String.format(Locale.US,"Lat: %.6f, Lon: %.6f",location.latitude,location.longitude)
+                + "; Precisão: "+location.accuracy.toInt()+" m; Capturada: "+captured
+                + "; Fonte: "+provider
+            target.setText(result)
+            scheduleDraftSave()
+            toast(if(location.accuracy>100f)
+                "Localização aproximada; confira antes de finalizar" else "Localização registrada")
+        }
+        try {
+            if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.R)
+                manager.getCurrentLocation(provider,null,mainExecutor){applyLocation(it)}
+            else manager.requestSingleUpdate(provider,object:LocationListener {
+                override fun onLocationChanged(location:Location){applyLocation(location)}
+            },Looper.getMainLooper())
+        } catch(e:Exception){toast("GPS indisponível: "+(e.message?:"erro"))}
+    }
+
+    override fun onRequestPermissionsResult(req:Int,permissions:Array<out String>,grants:IntArray) {
+        super.onRequestPermissionsResult(req,permissions,grants)
+        if(req==901) {
+            val field=pendingGpsField
+            pendingGpsField=null
+            if(grants.any{it==PackageManager.PERMISSION_GRANTED}&&field!=null)fillGps(field)
+            else toast("Para capturar a localização, autorize o GPS do Sentinela")
+        }
+    }
     private var selectedIncidentId: String? = null
     private var availableUpdate: UpdateChecker.Release? = null
     private var checkingUpdate = false
@@ -1169,8 +1223,12 @@ class MainActivity : Activity() {
         val servidores=section(body,"Servidores responsáveis — editáveis")
         val staff=staffEditor(servidores,oldExtra.servidores,readonly)
         val outros=field(servidores,"Observações sobre outros agentes",value=old.outrosAgentes)
-        val gps=field(section(body,"Localização da ocorrência"),
+        val gpsBlock=section(body,"Localização da ocorrência")
+        val gps=field(gpsBlock,
             "Coordenadas / precisão / horário de captura",value=old.gps)
+        if(!readonly)gpsBlock.addView(button("📍 Capturar GPS deste atendimento",false) {
+            fillGps(gps)
+        })
 
         val signer=section(body,"Assinatura manuscrita do agente")
         val mat=field(signer,"Matrícula do agente",
