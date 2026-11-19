@@ -1,0 +1,73 @@
+name: SENTINELA 0.7.2 - sincronizacao agil
+on:
+  push:
+    branches: [sentinela-0.7.2-sincronizacao-rapida]
+    paths: ['.github/workflows/compilar-v072.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Android SDK 35
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" --install "platforms;android-35" "build-tools;35.0.0"
+      - name: Validar icone fornecido e recursos
+        run: |
+          python3 -m pip install --quiet pillow
+          python3 - <<'PY'
+          from PIL import Image
+          from pathlib import Path
+          p=Path("app/src/main/res/drawable/sentinela_app_icon.webp")
+          im=Image.open(p)
+          im.verify()
+          im=Image.open(p).convert("RGBA")
+          assert im.width >= 96 and im.height >= 96, (im.width, im.height)
+          assert Path("app/src/main/java/br/gov/rs/sapucaiadosul/sentinela/HubAuth.kt").exists()
+          print("Icone Sentinela validado:",im.size)
+          PY
+          grep -F 'android:icon="@drawable/sentinela_app_icon"' app/src/main/AndroidManifest.xml
+      - name: Conferir sincronizacao foreground e seguranca de atualizacao
+        run: |
+          grep -q '12_000L' app/src/main/java/br/gov/rs/sapucaiadosul/sentinela/MainActivity.kt
+          grep -q 'nowResult' app/src/main/java/br/gov/rs/sapucaiadosul/sentinela/SyncJobService.kt
+          grep -q 'refreshVisibleScreen' app/src/main/java/br/gov/rs/sapucaiadosul/sentinela/MainActivity.kt
+      - name: Compilar APK isolado para instalacao de teste
+        run: gradle --no-daemon --stacktrace :app:assembleDebug
+      - name: Validar pacote e identificacao
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F "package: name='br.gov.rs.sapucaiadosul.sentinela.atualizavel.hub072'"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F "versionCode='15' versionName='0.7.2-piloto'"
+          cp "$APK" SENTINELA-COMPDEC-0.7.2-SINCRONIZACAO-RAPIDA.apk
+          sha256sum SENTINELA-COMPDEC-0.7.2-SINCRONIZACAO-RAPIDA.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SENTINELA-COMPDEC-0.7.2-APK
+          path: SENTINELA-COMPDEC-0.7.2-SINCRONIZACAO-RAPIDA.apk
+          if-no-files-found: error
+      - name: Publicar APK piloto sem sobrescrever versoes anteriores
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TAG=v0.7.2-sync-rapida
+          if gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
+            gh release upload "$TAG" SENTINELA-COMPDEC-0.7.2-SINCRONIZACAO-RAPIDA.apk --repo "$GH_REPO" --clobber
+          else
+            gh release create "$TAG" SENTINELA-COMPDEC-0.7.2-SINCRONIZACAO-RAPIDA.apk --repo "$GH_REPO" --title "Sentinela COMPDEC 0.7.2 - sincronizacao rapida" --notes "Piloto com sincronizacao automatica a cada 12 segundos em primeiro plano, envio imediato apos alteracoes, atualizacao de lista, teclado corrigido e icone oficial. HUB externo ainda depende de instalacao do gateway/Tailscale Funnel no servidor. Contas HUB necessarias. Nao utilizar em ocorrencias reais antes da homologacao. Instalacao paralela ao piloto 0.7.1; dados anteriores nao migram automaticamente. Exporte os registros antes de remover o piloto antigo." --prerelease --target sentinela-0.7.2-sincronizacao-rapida
+          fi
