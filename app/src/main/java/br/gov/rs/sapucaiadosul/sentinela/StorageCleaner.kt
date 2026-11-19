@@ -61,7 +61,7 @@ object StorageCleaner {
             }
         }finally{c.disconnect()}
     }
-    fun clean(ctx:Context,minAgeMillis:Long,done:(Result)->Unit) {
+    fun clean(ctx:Context,minAgeMillis:Long,preview:Boolean=false,done:(Result)->Unit) {
         Thread({
             var removed=0;var bytes=0L;var ignored=0;var failure:String?=null
             try{
@@ -85,6 +85,7 @@ object StorageCleaner {
                         val uploaded=matching[hash]
                         if(uploaded==null){ignored++;continue}
                         val length=file.length()
+                        if(preview){removed++;bytes+=length;continue}
                         val db=db(ctx)
                         db.insertWithOnConflict("cache_evictions",null,ContentValues().apply{
                             put("local_path",file.absolutePath)
