@@ -1275,24 +1275,47 @@ class MainActivity : Activity() {
             fillGps(gps)
         })
 
-        val signer=section(body,"Assinatura manuscrita do agente")
-        val mat=field(signer,"Matrícula do agente",
-            value=old.agenteMatricula.ifBlank {currentUser?.matricula.orEmpty()})
-        val agentName=field(signer,"Nome do agente",
-            value=old.agenteNome.ifBlank {currentUser?.name.orEmpty()})
-        var agentSignature=old.agenteSignature
-        val agentLabel=label(if(agentSignature.isNotBlank() && File(agentSignature).exists())
-            "Assinatura registrada" else "Assinatura pendente",12f)
+        val firstAgent=oldExtra.servidores.firstOrNull()
+        val firstMat=firstAgent?.matricula?.trim().orEmpty().ifBlank {
+            old.agenteMatricula.ifBlank{currentUser?.matricula.orEmpty()}
+        }
+        val firstName=firstAgent?.nome?.trim().orEmpty().ifBlank{
+            old.agenteNome.ifBlank{currentUser?.name.orEmpty()}
+        }
+        val ownFirst=firstMat==currentUser?.matricula
+        val signer=section(body,"Assinatura do primeiro agente")
+        signer.addView(label("Somente o primeiro servidor listado assina o BA. "+
+            "Matrícula e nome são recuperados do cadastro institucional.",12f))
+        val mat=field(signer,"Matrícula do primeiro agente",value=firstMat)
+        val agentName=field(signer,"Nome do primeiro agente",value=firstName)
+        mat.isEnabled=false
+        agentName.isEnabled=false
+        val myRegisteredSignature=if(ownFirst)store.userById(currentUser!!.id)?.signaturePath.orEmpty()
+            else ""
+        var agentSignature=if(old.agenteMatricula==firstMat && old.agenteSignature.isNotBlank()
+            && File(old.agenteSignature).isFile)old.agenteSignature
+            else myRegisteredSignature.takeIf{it.isNotBlank()&&File(it).isFile}.orEmpty()
+        val agentLabel=label(if(agentSignature.isNotBlank())
+            "Assinatura cadastrada pronta para integrar o BA" else
+            "Assinatura do primeiro agente pendente",12f)
         signer.addView(agentLabel)
-        if(!readonly)signer.addView(button("Assinar livremente na tela",false) {
-            if(mat.text.isBlank()||agentName.text.isBlank())
-                return@button toast("Informe nome e matrícula do agente")
-            collectSignature("Assinatura do agente",
-                File(FileTools.dir(this,id),"assinatura_agente.png")) { path ->
-                agentSignature=path;agentLabel.text="Assinatura registrada"
+        if(!readonly && ownFirst) signer.addView(button(
+            if(agentSignature.isBlank())"Cadastrar assinatura do primeiro agente"
+            else "Atualizar assinatura cadastrada",false) {
+            val folder=File(filesDir,"assinaturas").apply{mkdirs()}
+            val target=File(folder,currentUser!!.matricula+".png")
+            collectSignature("Assinatura de "+currentUser!!.name,target){path->
+                store.saveRegisteredSignature(currentUser!!.id,path)
+                HubSignature.markPending(this,currentUser!!.matricula)
+                HubSignature.sync(applicationContext,currentUser!!.matricula)
+                agentSignature=path
+                agentLabel.text="Assinatura do primeiro agente cadastrada"
                 scheduleDraftSave()
             }
         })
+        if(!readonly && !ownFirst)signer.addView(label(
+            "Este usuário não é o primeiro agente. A assinatura deverá ser confirmada "+
+                "pelo titular da matrícula "+firstMat+" em sua própria sessão.",12f))
         var responsibleSignature=old.responsavelSignature
         val resident=section(body,"Assinatura do responsável no local")
         val residentLabel=label(if(responsibleSignature.isNotBlank() && File(responsibleSignature).exists())
@@ -1306,11 +1329,18 @@ class MainActivity : Activity() {
             }
         })
 
-        fun report(): Report = Report(id,historico.text.toString().trim(),
-            providencias.text.toString().trim(),responsavel.text.toString().trim(),
-            doc.text.toString().trim(),mat.text.toString().trim(),agentName.text.toString().trim(),
-            agentSignature,responsibleSignature,outros.text.toString().trim(),
-            gps.text.toString().trim(),LocalStore.now())
+        fun report(): Report {
+            val first=staffValues(staff).firstOrNull()
+            val finalMat=first?.matricula?.ifBlank{firstMat}?:firstMat
+            val finalName=first?.nome?.ifBlank{firstName}?:firstName
+            // Se mudou o primeiro agente, a assinatura anterior não é reutilizada.
+            val signed=agentSignature.takeIf{finalMat==firstMat && ownFirst}.orEmpty()
+            return Report(id,historico.text.toString().trim(),
+                providencias.text.toString().trim(),responsavel.text.toString().trim(),
+                doc.text.toString().trim(),finalMat,finalName,
+                signed,responsibleSignature,outros.text.toString().trim(),
+                gps.text.toString().trim(),LocalStore.now())
+        }
 
         fun extras(): BAExtras = oldExtra.copy(
             solicitanteCpf=cpf.text.toString().trim(),
