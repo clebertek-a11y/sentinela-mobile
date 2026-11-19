@@ -276,9 +276,8 @@ class HubSyncEngine(private val context: Context) {
         val sources = mutableListOf<File>()
         store.photos(item.id).forEach { sources.add(File(it.path)) }
         if (item.pdfPath.isNotBlank()) sources.add(File(item.pdfPath))
-        val report=store.report(item.id)
-        if (report.agenteSignature.isNotBlank()) sources.add(File(report.agenteSignature))
-        if (report.responsavelSignature.isNotBlank()) sources.add(File(report.responsavelSignature))
+        // Assinaturas permanecem no perfil e no BA assinado;
+        // não são enviadas como PNG avulso para a pasta da ocorrência.
         var sent = 0
         for (f in sources) {
             if (!f.isFile) throw IllegalStateException("Anexo local nao encontrado: " + f.name)
