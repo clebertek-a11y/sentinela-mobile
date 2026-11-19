@@ -155,7 +155,7 @@ object ReportPdf {
                     Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
                 cityLogo.recycle()
             }
-            val logo=BitmapFactory.decodeResource(ctx.resources,R.drawable.ba_defesa_civil)
+            val logo=BitmapFactory.decodeResource(ctx.resources,R.drawable.defesa_civil_logo)
             if(logo!=null) {
                 cv.drawBitmap(logo,null,RectF(473f,31f,548f,106f),
                     Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
