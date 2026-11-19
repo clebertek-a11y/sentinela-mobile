@@ -153,7 +153,9 @@ class HubSyncEngine(private val context: Context) {
             .put("agente_matricula",r.agenteMatricula).put("agente_nome",r.agenteNome)
             .put("outros_agentes",r.outrosAgentes).put("gps",r.gps)
             .put("atualizado_em",r.atualizadoEm)
-        return JSONObject().put("numero_sigope",i.number).put("data",i.date)
+        val extras = BAExtrasStore(store).get(i.id)
+        return JSONObject().put("ba_complementar",extras.toJSON())
+            .put("numero_sigope",i.number).put("data",i.date)
             .put("categoria",i.category).put("solicitante",i.solicitante)
             .put("telefone",i.telefone).put("endereco",i.rua).put("bairro",i.bairro)
             .put("tipo",i.tipo).put("descricao",i.descricao).put("equipe",i.equipe)
@@ -188,6 +190,9 @@ class HubSyncEngine(private val context: Context) {
             if (db.update("incidents",cv,"id=?",arrayOf(id)) != 1) error("Erro ao atualizar ocorrencia")
         } else {
             db.insertOrThrow("incidents",null,cv)
+        }
+        data.optJSONObject("ba_complementar")?.let { received ->
+            BAExtrasStore(store).save(id,BAExtras.fromJSON(received),markPending=false)
         }
         val report = data.optJSONObject("relatorio")
         if (report != null) {
@@ -257,6 +262,9 @@ class HubSyncEngine(private val context: Context) {
         val sources = mutableListOf<File>()
         store.photos(item.id).forEach { sources.add(File(it.path)) }
         if (item.pdfPath.isNotBlank()) sources.add(File(item.pdfPath))
+        val report=store.report(item.id)
+        if (report.agenteSignature.isNotBlank()) sources.add(File(report.agenteSignature))
+        if (report.responsavelSignature.isNotBlank()) sources.add(File(report.responsavelSignature))
         var sent = 0
         for (f in sources) {
             if (!f.isFile) throw IllegalStateException("Anexo local nao encontrado: " + f.name)
