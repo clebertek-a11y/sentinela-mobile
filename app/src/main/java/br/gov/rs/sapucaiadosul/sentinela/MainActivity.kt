@@ -614,6 +614,63 @@ class MainActivity : Activity() {
         catch (_: Exception) { toast("Não há aplicativo de mapas disponível") }
     }
 
+    /** Apenas anexos já recebidos pelo HUB podem ser limpos e restaurados. */
+    private fun storageManagement() {
+        val body=screen("Armazenamento do aparelho",
+            "Cópias locais verificadas no SERVIDOR02",::dashboard)
+        val card=section(body,"Liberação segura de espaço")
+        card.addView(label("A ocorrência e seu histórico permanecem no Sentinela. "+
+            "Somente fotos e PDFs de atendimentos concluídos e confirmados pelo HUB "+
+            "podem ser removidos deste aparelho. Arquivos pessoais da galeria "+
+            "não são apagados.",13f))
+        val options=listOf("Mais antigos que 1 hora","Mais antigos que 24 horas",
+            "Mais antigos que 15 dias","Mais antigos que 30 dias")
+        val periods=listOf(3_600_000L,86_400_000L,
+            15L*86_400_000L,30L*86_400_000L)
+        val choice=Spinner(this).apply {
+            adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,options)
+            setSelection(2)
+        }
+        card.addView(label("Período de limpeza",13f,true))
+        card.addView(choice)
+        val info=label("Aguardando verificação. Nenhum documento será excluído "+
+            "sem confirmação.",12f)
+        card.addView(info)
+        card.addView(button("Verificar arquivos que podem ser limpos"){
+            info.text="Consultando arquivos arquivados no HUB..."
+            val age=periods[choice.selectedItemPosition]
+            StorageCleaner.clean(applicationContext,age,preview=true){result->
+                if(result.error!=null) {
+                    info.text="Não foi possível verificar: "+result.error
+                    return@clean
+                }
+                val mb=String.format(Locale("pt","BR"),"%.2f",result.bytes/1048576.0)
+                info.text="${result.arquivos} arquivo(s) elegíveis: ${mb} MB"
+                if(result.arquivos==0)return@clean
+                AlertDialog.Builder(this).setTitle("Confirmar limpeza segura?")
+                    .setMessage("Liberar aproximadamente ${mb} MB de "+
+                        "${result.arquivos} cópias locais?\n\n"+
+                        "O HUB já confirmou os arquivos por checksum. "+
+                        "A consulta e a recuperação continuarão disponíveis. "+
+                        "Ocorrências e documentos do servidor NÃO serão apagados.")
+                    .setNegativeButton("Cancelar",null)
+                    .setPositiveButton("Liberar espaço"){_,_->
+                        info.text="Limpando cópias confirmadas..."
+                        StorageCleaner.clean(applicationContext,age,preview=false){done->
+                            val freed=String.format(Locale("pt","BR"),
+                                "%.2f",done.bytes/1048576.0)
+                            info.text=if(done.error==null)
+                                "Limpeza concluída: ${done.arquivos} arquivo(s), ${freed} MB."
+                                else "Limpeza parcial: ${done.arquivos} arquivo(s). "+done.error
+                        }
+                    }.show()
+            }
+        })
+        card.addView(label("Não limpe arquivos com envio pendente ou em conflito. "+
+            "Para recuperar documentos de uma ocorrência, abra seus detalhes "+
+            "e selecione 'Restaurar arquivos neste celular'.",12f))
+    }
+
     private fun profileScreen() {
         val u=currentUser ?:return showLogin()
         val body=screen("Minha área", "${u.name} • ${u.matricula}",::dashboard)
@@ -636,6 +693,7 @@ class MainActivity : Activity() {
         })
         info.addView(label("Permissões disponíveis: ${Rights.custom.filter { has(it) }.joinToString { Rights.labels[it] ?: it }}",12f))
         info.addView(button("Alterar minha senha", false) { changePasswordAtLogin(u) })
+        info.addView(button("Gerenciar armazenamento e arquivos",false) {storageManagement()})
         info.addView(button("Sair da conta",false) { explicitLogout() })
     }
 
@@ -1209,6 +1267,19 @@ class MainActivity : Activity() {
         } else if(o.status!="Atendida") stage.addView(label("Para executar este atendimento, aceite a ocorrência e utilize as permissões concedidas pelo administrador.",13f))
         val docs=section(body,"Boletim, fotos e arquivamento")
         docs.addView(label("Boletim PDF: ${if(o.pdfPath.isBlank()) "Pendente" else "Gerado"}\nFotos: ${store.photos(id).size}\nSincronização: ${o.syncState}",13f))
+        if(StorageCleaner.hasEvicted(this,id)){
+            docs.addView(label("Alguns anexos foram limpos deste aparelho; "+
+                "os documentos originais continuam no HUB.",12f))
+            docs.addView(button("Restaurar arquivos neste celular",false){
+                toast("Solicitando arquivos ao HUB...")
+                StorageCleaner.restore(applicationContext,id){result->
+                    toast(if(result.error!=null)
+                        "Restauração parcial: "+result.error
+                        else "${result.arquivos} arquivo(s) recuperados")
+                    openIncident(id)
+                }
+            })
+        }
         if(o.status=="Atendida") {
             if(has(Rights.BA)) docs.addView(button("Consultar BA",false){reportScreen(id)})
             if(has(Rights.EXPORT)) docs.addView(button("Exportar PDFs e fotografias",false){exportIncident(id)})
