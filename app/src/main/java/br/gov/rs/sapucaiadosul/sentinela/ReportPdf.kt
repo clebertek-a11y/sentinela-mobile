@@ -233,7 +233,9 @@ object ReportPdf {
                     if(i%2==0)ensure(190f)
                     val x=LEFT+(i%2)*(width+13f)
                     if(i%2==0)rect(LEFT,y,RIGHT-LEFT,height+18f,GRAY)
-                    val bitmap=BitmapFactory.decodeFile(item.path)
+                    val bitmap=BitmapFactory.decodeFile(item.path,BitmapFactory.Options().apply{
+                        inSampleSize=2
+                    })
                     if(bitmap!=null){
                         val maxW=width-8f;val maxH=height-6f
                         val scale=minOf(maxW/bitmap.width.toFloat(),maxH/bitmap.height.toFloat())
