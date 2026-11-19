@@ -32,6 +32,10 @@ object SecureSecrets {
         ctx.getSharedPreferences(PREFS,Context.MODE_PRIVATE).edit()
             .putString("token_enc",Base64.encodeToString(bytes,Base64.NO_WRAP)).apply()
     }
+    fun clear(ctx: Context) {
+        ctx.getSharedPreferences(PREFS,Context.MODE_PRIVATE).edit()
+            .remove("token_enc").apply()
+    }
     fun read(ctx: Context): String {
         val raw = ctx.getSharedPreferences(PREFS,Context.MODE_PRIVATE).getString("token_enc",null) ?: return ""
         return try {
