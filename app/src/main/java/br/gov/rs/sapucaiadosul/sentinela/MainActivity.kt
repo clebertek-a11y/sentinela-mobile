@@ -446,7 +446,8 @@ class MainActivity : Activity() {
      */
     private fun safeBottomNavigation(root: View, navigation: View?) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val initialBottom=root.paddingBottom
+            // Sempre usar o inset real, sem somar duas vezes após redibujar a tela.
+            val initialBottom=0
             root.setOnApplyWindowInsetsListener { view, insets ->
                 val bars=insets.getInsets(WindowInsets.Type.navigationBars()).bottom
                 val keyboard=insets.getInsets(WindowInsets.Type.ime()).bottom
