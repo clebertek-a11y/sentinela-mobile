@@ -1,0 +1,67 @@
+name: SENTINELA 0.8.0 - Publicar piloto consolidado
+on:
+  push:
+    branches: [sentinela-0.8.0-consolidado]
+    paths: ['.github/workflows/publicar-v080.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  validar-e-publicar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Android SDK 35
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" --install "platforms;android-35" "build-tools;35.0.0"
+      - name: Validar logotipos do PDF, icone e recursos essenciais
+        run: |
+          python3 -m pip install --quiet pillow
+          python3 - <<'PY'
+          from pathlib import Path
+          from PIL import Image
+          d=Path("app/src/main/res/drawable")
+          for name in ("ba_prefeitura.webp","ba_defesa_civil.webp","sentinela_app_icon.webp"):
+              f=d/name
+              im=Image.open(f);im.verify()
+              print(name,"OK")
+          for name in ("BAExtras.kt","HubRealtime.kt","HubSyncEngine.kt","ReportPdf.kt"):
+              assert (Path("app/src/main/java/br/gov/rs/sapucaiadosul/sentinela")/name).exists()
+          PY
+      - name: Compilar APK do piloto
+        run: gradle --no-daemon --stacktrace :app:assembleDebug
+      - name: Validar assinatura, numero da versao e integridade
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F "package: name='br.gov.rs.sapucaiadosul.sentinela.atualizavel.hub08'"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F "versionCode='16' versionName='0.8.0-piloto'"
+          cp "$APK" SENTINELA-COMPDEC-0.8.0-CONSOLIDADO-PILOTO.apk
+          sha256sum SENTINELA-COMPDEC-0.8.0-CONSOLIDADO-PILOTO.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SENTINELA-COMPDEC-0.8.0
+          path: SENTINELA-COMPDEC-0.8.0-CONSOLIDADO-PILOTO.apk
+          if-no-files-found: error
+      - name: Publicar instalador piloto sem sobrescrever o anterior
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TAG=v0.8.0-consolidado-piloto
+          if gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
+              gh release upload "$TAG" SENTINELA-COMPDEC-0.8.0-CONSOLIDADO-PILOTO.apk --repo "$GH_REPO" --clobber
+          else
+              gh release create "$TAG" SENTINELA-COMPDEC-0.8.0-CONSOLIDADO-PILOTO.apk --repo "$GH_REPO" --title "Sentinela COMPDEC 0.8.0 - Piloto consolidado" --notes "Piloto com BA baseado no modelo da Defesa Civil, registros pre-preenchidos, login persistente, autosave, fotos e PDFs compartilhados, notificacoes imediatas quando conectado ao HUB 1.1.0-rc1. Requer atualizar HUB e Gateway no SERVIDOR02 antes de testar. Instalacao separada dos pilotos antigos, sem migracao automatica; nao utilizar com dados reais antes da homologacao." --prerelease --target sentinela-0.8.0-consolidado
+          fi
