@@ -989,15 +989,49 @@ class MainActivity : Activity() {
         val old = store.report(id)
         val readonly = o.status == "Atendida" || !store.canOperate(id,currentUser!!.id,Rights.BA)
         val body = screen("Boletim de Atendimento", "${o.number} • ${o.rua}", { openIncident(id) })
-        val c = section(body, "Dados do atendimento")
-        c.addView(label("Solicitante: ${o.solicitante}\nLocal: ${o.rua} — ${o.bairro}\nNatureza: ${o.tipo}", 13f))
-        val historico = field(c, "Histórico / constatações", value = old.historico)
-        val providencias = field(c, "Providências adotadas", value = old.providencias)
-        val responsavel = field(c, "Responsável presente no local",value=old.responsavel.ifBlank { o.solicitante })
-        val doc = field(c, "Documento do responsável (quando informado)", value = old.responsavelDocumento)
-        val outros = field(c, "Outros agentes (não assinam o BA)",value=old.outrosAgentes)
-        val gps = field(c, "Localização / observações de GPS",value=old.gps)
-        if(readonly) listOf(historico,providencias,responsavel,doc,outros,gps).forEach { it.isEnabled=false }
+        val base=store.baMeta(id)
+        val c=section(body,"Dados do solicitante — conferência")
+        c.addView(label("Dados recebidos do operador. Corrija quando necessário.",12f))
+        val sol=field(c,"Solicitante",value=o.solicitante)
+        val solCpf=field(c,"CPF do solicitante",value=base.solicitanteCpf)
+        val solPhone=field(c,"Telefone do solicitante",value=o.telefone)
+        val address=field(c,"Endereço (rua e número)",value=o.rua)
+        val district=field(c,"Bairro",value=o.bairro)
+        val group=section(body,"Tipo do solicitante e atendimento")
+        val requester=addSelector(group,"Tipo do solicitante",OccurrenceCatalog.requesterTypes,base.tipoSolicitante)
+        val attendance=addSelector(group,"Modalidade de atendimento",OccurrenceCatalog.attendanceTypes,base.tipoAtendimento)
+        val occurrenceType=section(body,"Tipos de ocorrência")
+        val selectedTypes=mutableSetOf<String>()
+        try {
+            val array=JSONArray(base.tiposOcorrencia)
+            for(ix in 0 until array.length())selectedTypes.add(array.optString(ix))
+        } catch(_:Exception){selectedTypes.addAll(o.tipo.split("; ").filter{it.isNotBlank()})}
+        addTypeChooser(occurrenceType,selectedTypes)
+        val custom=field(occurrenceType,"Outros (descrição complementar)")
+        val cReport=section(body,"Dados do atendimento")
+        cReport.addView(label("Histórico inicial: ${o.descricao}",12f))
+        val historico=field(cReport,"Histórico / constatações",
+            value=old.historico.ifBlank{o.descricao})
+        val providencias=field(cReport,"Providências adotadas",value=old.providencias)
+        val contact=section(body,"Responsável no momento da vistoria")
+        val responsavel=field(contact,"Nome do responsável",value=old.responsavel.ifBlank{o.solicitante})
+        val doc=field(contact,"CPF do responsável",value=old.responsavelDocumento)
+        val responsiblePhone=field(contact,"Telefone do responsável",value=base.responsavelTelefone)
+        val relation=field(contact,"Vínculo com o solicitante",value=base.responsavelVinculo)
+        val crew=section(body,"Servidores responsáveis")
+        val staffArray=try{JSONArray(base.servidores)}catch(_:Exception){JSONArray()}
+        val staffText=(0 until staffArray.length()).map { ix ->
+            val ob=staffArray.optJSONObject(ix)
+            (ob?.optString("nome")?:"")+" - "+(ob?.optString("matricula")?:"")
+        }.joinToString("\n").ifBlank { currentUser?.let{"${it.name} - ${it.matricula}"}?:"" }
+        val crewField=field(crew,"Nome - matrícula (um por linha)",value=staffText)
+        crewField.setSingleLine(false);crewField.minLines=2
+        val outros=field(crew,"Outros agentes presentes",value=old.outrosAgentes)
+        val location=section(body,"Localização da ocorrência")
+        val gps=field(location,"Localização / observações de GPS",value=old.gps)
+        if(readonly) listOf(sol,solCpf,solPhone,address,district,historico,providencias,
+            responsavel,doc,responsiblePhone,relation,crewField,outros,gps).forEach{it.isEnabled=false}
+        if(readonly){requester.isEnabled=false;attendance.isEnabled=false;custom.isEnabled=false}
         // Assinatura manuscrita livre no atendimento, como a do responsavel.
         // A identidade do usuario que abriu o BA continua registrada na auditoria.
         val signer = section(body, "Assinatura do agente no local")
@@ -1019,6 +1053,7 @@ class MainActivity : Activity() {
                 File(FileTools.dir(this,id),"assinatura_primeiro_agente.png")) { path ->
                 agentSignature = path
                 agentLabel.text = "Assinatura registrada • " + agentNameField.text.toString().trim()
+                autosaveSoon()
             }
         })
         var responsibleSignature = old.responsavelSignature
@@ -1029,22 +1064,61 @@ class MainActivity : Activity() {
             collectSignature("Assinatura do responsável", File(FileTools.dir(this,id),"assinatura_responsavel.png")) { path ->
                 responsibleSignature = path
                 residentLabel.text = "Assinatura registrada"
+                autosaveSoon()
             }
         })
-        fun report(): Report = Report(id, historico.text.toString().trim(), providencias.text.toString().trim(),
+        fun report(): Report=Report(id,historico.text.toString().trim(),providencias.text.toString().trim(),
             responsavel.text.toString().trim(),doc.text.toString().trim(),mat.text.toString().trim(),
-            agentNameField.text.toString().trim(),agentSignature,responsibleSignature,outros.text.toString().trim(),gps.text.toString().trim(), LocalStore.now())
+            agentNameField.text.toString().trim(),agentSignature,responsibleSignature,
+            outros.text.toString().trim(),gps.text.toString().trim(),LocalStore.now())
+        if(!readonly) {
+            flushCurrentDraft={
+                try {
+                    val types=selectedTypes.toMutableList()
+                    if(custom.text.toString().isNotBlank())types.add("Outros - "+custom.text.toString().trim())
+                    store.updateIncidentDetails(id,sol.text.toString(),solPhone.text.toString(),
+                        address.text.toString(),district.text.toString(),types.joinToString("; "),
+                        currentUser!!.id)
+                    val array=JSONArray()
+                    crewField.text.toString().lines().filter{it.isNotBlank()}.forEach{line->
+                        val pieces=line.split(" - ",limit=2)
+                        array.put(JSONObject().put("nome",pieces[0].trim())
+                            .put("matricula",pieces.getOrElse(1){""}.trim()))
+                    }
+                    store.saveBaMeta(id,BAExtra(
+                        solicitanteCpf=solCpf.text.toString().trim(),
+                        tipoSolicitante=selectorValue(requester),
+                        tipoAtendimento=selectorValue(attendance),
+                        responsavelTelefone=responsiblePhone.text.toString().trim(),
+                        responsavelVinculo=relation.text.toString().trim(),
+                        tiposOcorrencia=JSONArray(types).toString(),
+                        servidores=array.toString()
+                    ),currentUser!!.id)
+                    saveDraft(report())
+                    prefs.edit().putLong("ba_autosave_"+id,System.currentTimeMillis()).apply()
+                }catch(e:Exception){toast("Não foi possível salvar rascunho: "+(e.message?:"erro"))}
+            }
+            watchForAutosave(sol,solCpf,solPhone,address,district,historico,providencias,
+                responsavel,doc,responsiblePhone,relation,crewField,outros,gps,mat,agentNameField,custom)
+            val spinnerListener=object:android.widget.AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(parent:android.widget.AdapterView<*>?,view:View?,pos:Int,rowId:Long){autosaveSoon()}
+                override fun onNothingSelected(parent:android.widget.AdapterView<*>?){}
+            }
+            requester.onItemSelectedListener=spinnerListener
+            attendance.onItemSelectedListener=spinnerListener
+        }
         val photosBlock = section(body, "Registro fotográfico")
         val photoCounter = label("${store.photos(id).size} fotografia(s) armazenada(s) neste aparelho", 13f)
         photosBlock.addView(photoCounter)
         if (!readonly && has(Rights.PHOTOS)) {
-            photosBlock.addView(button("Tirar fotografia") { saveDraft(report()); takePhoto(id) })
-            photosBlock.addView(button("Selecionar da galeria",false) { saveDraft(report()); choosePhoto(id) })
+            photosBlock.addView(button("Tirar fotografia") { persistCurrentDraft(); takePhoto(id) })
+            photosBlock.addView(button("Selecionar da galeria",false) { persistCurrentDraft(); choosePhoto(id) })
         }
         store.photos(id).forEachIndexed { ix, _ -> photosBlock.addView(label("Foto ${ix+1} — salva localmente", 12f)) }
         val actions = section(body, "Gravação e conclusão")
         if (!readonly) {
-            actions.addView(button("Salvar rascunho", false) { saveDraft(report()); toast("Rascunho salvo no aparelho") })
+            actions.addView(label("Rascunho salvo automaticamente no aparelho após digitar. Sincronização com o HUB quando houver internet.",12f))
+            actions.addView(button("Salvar rascunho",false) { persistCurrentDraft(); toast("Rascunho salvo no aparelho") })
             if(has(Rights.FINISH)) actions.addView(button("Salvar BA e finalizar ocorrência") {
                 val r = report()
                 if (r.historico.isBlank() || r.providencias.isBlank()) return@button toast("Preencha histórico e providências")
@@ -1053,8 +1127,8 @@ class MainActivity : Activity() {
                 val photoList = store.photos(id)
                 if (photoList.isEmpty()) return@button toast("Envie pelo menos uma fotografia antes de finalizar")
                 try {
-                    saveDraft(r)
-                    val pdf = ReportPdf.generate(this, o, r, photoList)
+                    persistCurrentDraft()
+                    val pdf=ReportPdf.generate(this,store.incident(id)?:o,r,photoList)
                     store.conclude(id,pdf.absolutePath,currentUser!!.id)
                     val completed=store.incident(id) ?: error("Falha ao consultar a ocorrência concluída")
                     TimelinePdf.generate(this,completed,store.auditEvents(id))
