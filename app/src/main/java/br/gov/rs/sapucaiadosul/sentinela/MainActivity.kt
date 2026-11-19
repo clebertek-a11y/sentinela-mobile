@@ -14,6 +14,8 @@ import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
 import android.text.InputType
 import android.text.method.PasswordTransformationMethod
@@ -48,6 +50,62 @@ class MainActivity : Activity() {
     private var pilotUnlockVerified = false
     private val prefs by lazy { getSharedPreferences("sync_settings", Context.MODE_PRIVATE) }
 
+    /** Enquanto a tela esta aberta: consultar alteracoes sem depender do JobScheduler. */
+    private val liveHandler = Handler(Looper.getMainLooper())
+    private var foregroundSyncStarted = false
+    private var foregroundSyncInFlight = false
+    private var refreshVisibleScreen: (() -> Unit)? = null
+    private val foregroundSyncTick = object : Runnable {
+        override fun run() {
+            if (!foregroundSyncStarted || currentUser == null) return
+            if (foregroundSyncInFlight) return
+            foregroundSyncInFlight = true
+            SyncJobService.nowResult(applicationContext) { result, error ->
+                foregroundSyncInFlight = false
+                if (!foregroundSyncStarted || isFinishing || isDestroyed || currentUser == null) return@nowResult
+                if (result != null && (result.received > 0 || result.sent > 0)) {
+                    // Nunca desmontar formulario de atendimento em preenchimento.
+                    // As telas de lista sao atualizadas automaticamente.
+                    refreshVisibleScreen?.invoke()
+                }
+                // Sem internet/erro, espaçar tentativas para poupar bateria.
+                liveHandler.removeCallbacks(this)
+                liveHandler.postDelayed(this, if (error == null) 12_000L else 45_000L)
+            }
+        }
+    }
+
+    private fun beginForegroundSync() {
+        if (foregroundSyncStarted || currentUser == null) return
+        foregroundSyncStarted = true
+        liveHandler.removeCallbacks(foregroundSyncTick)
+        liveHandler.post(foregroundSyncTick)
+    }
+
+    private fun stopForegroundSync() {
+        foregroundSyncStarted = false
+        liveHandler.removeCallbacks(foregroundSyncTick)
+    }
+
+    private fun scheduleSync() {
+        SyncJobService.schedule(this)
+        // Ao alterar dados, tentar enviar imediatamente se o aplicativo estiver aberto.
+        if (foregroundSyncStarted && !foregroundSyncInFlight) {
+            liveHandler.removeCallbacks(foregroundSyncTick)
+            liveHandler.postDelayed(foregroundSyncTick, 350L)
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        beginForegroundSync()
+    }
+
+    override fun onPause() {
+        stopForegroundSync()
+        super.onPause()
+    }
+
     private val navy = Color.rgb(20, 40, 73)
     private val orange = Color.rgb(242, 130, 37)
     private val bg = Color.rgb(246, 248, 251)
@@ -61,7 +119,7 @@ class MainActivity : Activity() {
         HubConfig.ensure(this)
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         showLogin()
-        if (prefs.contains("hub_user")) { SyncJobService.periodic(this); SyncJobService.schedule(this) }
+        if (prefs.contains("hub_user")) { SyncJobService.periodic(this); scheduleSync() }
         checkForUpdates(false)
     }
 
@@ -175,6 +233,7 @@ class MainActivity : Activity() {
     }
 
     private fun screen(title: String, subtitle: String = "", back: (() -> Unit)? = null): LinearLayout {
+        refreshVisibleScreen = null
         val root = vertical().apply { setBackgroundColor(bg) }
         val header = vertical().apply {
             setPadding(sp(20), sp(24), sp(20), sp(18))
@@ -244,6 +303,7 @@ class MainActivity : Activity() {
     }
 
     private fun openingScreen(title: String, sub: String): LinearLayout {
+        refreshVisibleScreen = null
         val shell = vertical().apply { setBackgroundColor(darkBg) }
         val scroll = ScrollView(this).apply { isFillViewport = true }
         val content = vertical()
@@ -312,6 +372,7 @@ class MainActivity : Activity() {
     }
 
     private fun caseListScreen() {
+        refreshVisibleScreen = null
         val user=currentUser?:return showLogin()
         val root=vertical().apply {setBackgroundColor(darkBg)}
         val scroll=ScrollView(this).apply {isFillViewport=true}
@@ -334,7 +395,7 @@ class MainActivity : Activity() {
         fun render(){
             list.removeAllViews()
             val q=search.text.toString().trim().lowercase()
-            val selected=cases.filter { q.isBlank() || listOf(it.number,it.rua,it.tipo,it.bairro).any{v->v.lowercase().contains(q)} }
+            val selected=store.incidents().filter { q.isBlank() || listOf(it.number,it.rua,it.tipo,it.bairro).any{v->v.lowercase().contains(q)} }
             if(selected.isEmpty())list.addView(darkLabel("Nenhuma ocorrência encontrada neste aparelho.",13f))
             selected.forEach{list.addView(dashboardCaseCard(it),LinearLayout.LayoutParams(-1,-2).apply {bottomMargin=sp(8)})}
         }
@@ -344,6 +405,7 @@ class MainActivity : Activity() {
             override fun afterTextChanged(s:Editable?){}
         })
         render()
+        refreshVisibleScreen = { render() }
         addBottomNav(root,"Ocorrências")
     }
 
@@ -397,6 +459,7 @@ class MainActivity : Activity() {
     }
 
     private fun showLogin() {
+        stopForegroundSync()
         currentUser = null
         val body = screen("Acesso operacional", "SIGOPE e Boletim de Atendimento em um único aplicativo")
         body.addView(ImageView(this).apply {
@@ -429,8 +492,9 @@ class MainActivity : Activity() {
                         SecureSecrets.save(this,senha)
                         currentUser=user
                         SyncJobService.periodic(this)
-                        SyncJobService.schedule(this)
+                        scheduleSync()
                         dashboard()
+                        beginForegroundSync()
                     } catch(e:Exception) { toast("Erro ao preparar acesso: " + (e.message ?: "credencial inválida")) }
                 } else if (error?.startsWith("HUB inacessível") == true) {
                     // O primeiro login precisa ser validado pelo HUB. Offline somente após isso.
@@ -439,6 +503,7 @@ class MainActivity : Activity() {
                         currentUser=user
                         toast("Sem internet: trabalhando offline. O envio ocorrerá depois.")
                         dashboard()
+                        beginForegroundSync()
                     } else toast("Primeiro acesso exige internet e conta ativa no HUB. " + error)
                 } else toast(error ?: "Autenticação não autorizada no HUB")
             }
@@ -539,6 +604,7 @@ class MainActivity : Activity() {
 
     /** Tela operacional: dados reais deste aparelho, visual inspirado no layout aprovado. */
     private fun dashboard() {
+        refreshVisibleScreen = null
         val user = currentUser ?: return showLogin()
         if (!user.active) return showLogin()
         val root=vertical().apply { setBackgroundColor(darkBg) }
@@ -687,6 +753,7 @@ class MainActivity : Activity() {
         }
         area.addView(darkLabel("IAntzen Tecnologia — Soluções Inteligentes",11f,false,Color.rgb(169,187,214)).apply {gravity=Gravity.CENTER;setPadding(0,sp(14),0,sp(14))})
         addBottomNav(root,"Início")
+        refreshVisibleScreen = { dashboard() }
     }
 
     private fun dashboardCaseCard(o: Incident): LinearLayout {
@@ -731,7 +798,7 @@ class MainActivity : Activity() {
             .setMessage("Seu nome e matrícula serão registrados no histórico. A equipe originalmente designada será preservada. Depois de aceitar, você poderá iniciar o deslocamento e o atendimento conforme suas permissões.")
             .setNegativeButton("Cancelar",null)
             .setPositiveButton("Aceitar") {_,_->
-                try {store.acceptIncident(id,currentUser!!.id);SyncJobService.schedule(this);toast("Atendimento aceito");openIncident(id)}
+                try {store.acceptIncident(id,currentUser!!.id);scheduleSync();toast("Atendimento aceito");openIncident(id)}
                 catch(e:Exception){toast(e.message?:"Não foi possível aceitar")}
             }.show()
     }
@@ -761,7 +828,7 @@ class MainActivity : Activity() {
                     telefone.text.toString(),rua.text.toString(),bairro.text.toString(),
                     tipo.text.toString(),descricao.text.toString(),equipe.text.toString(),
                     prioridade.selectedItem.toString(), currentUser!!.id)
-                SyncJobService.schedule(this)
+                scheduleSync()
                 toast("Ocorrência ${item.number} criada offline"); openIncident(item.id)
             } catch (e: Exception) { toast(e.message ?: "Erro ao registrar") }
         })
@@ -783,15 +850,15 @@ class MainActivity : Activity() {
         if(o.status!="Atendida" && !mine && has(Rights.ACCEPT)) stage.addView(button("Aceitar atendimento") {confirmAccept(id)})
         if(o.status!="Atendida" && (mine || u.role=="ADMIN")) {
             if(o.status=="Aguardando atendimento" && has(Rights.STATUS)) stage.addView(button("A caminho") {
-                try {store.updateStatus(id,"Equipe deslocada",u.id);SyncJobService.schedule(this);openIncident(id)} catch(e:Exception){toast(e.message?:"Falha ao mudar status")}
+                try {store.updateStatus(id,"Equipe deslocada",u.id);scheduleSync();openIncident(id)} catch(e:Exception){toast(e.message?:"Falha ao mudar status")}
             })
             if(o.status in setOf("Equipe deslocada","Aguardando apoio","Aguardando retorno") && has(Rights.STATUS)) stage.addView(button("Iniciar atendimento → Abrir BA") {
-                try {store.updateStatus(id,"Em atendimento",u.id);SyncJobService.schedule(this);reportScreen(id)} catch(e:Exception){toast(e.message?:"Falha ao iniciar")}
+                try {store.updateStatus(id,"Em atendimento",u.id);scheduleSync();reportScreen(id)} catch(e:Exception){toast(e.message?:"Falha ao iniciar")}
             })
             if(o.status=="Em atendimento" && has(Rights.BA)) stage.addView(button("Continuar Boletim de Atendimento") {reportScreen(id)})
             if(o.status in setOf("Equipe deslocada","Em atendimento") && has(Rights.STATUS)) {
-                stage.addView(button("Aguardando apoio",false){try{store.updateStatus(id,"Aguardando apoio",u.id);SyncJobService.schedule(this);openIncident(id)}catch(e:Exception){toast(e.message?:"Falha")}})
-                stage.addView(button("Aguardando retorno",false){try{store.updateStatus(id,"Aguardando retorno",u.id);SyncJobService.schedule(this);openIncident(id)}catch(e:Exception){toast(e.message?:"Falha")}})
+                stage.addView(button("Aguardando apoio",false){try{store.updateStatus(id,"Aguardando apoio",u.id);scheduleSync();openIncident(id)}catch(e:Exception){toast(e.message?:"Falha")}})
+                stage.addView(button("Aguardando retorno",false){try{store.updateStatus(id,"Aguardando retorno",u.id);scheduleSync();openIncident(id)}catch(e:Exception){toast(e.message?:"Falha")}})
             }
         } else if(o.status!="Atendida") stage.addView(label("Para executar este atendimento, aceite a ocorrência e utilize as permissões concedidas pelo administrador.",13f))
         val docs=section(body,"Boletim, fotos e arquivamento")
@@ -799,7 +866,7 @@ class MainActivity : Activity() {
         if(o.status=="Atendida") {
             if(has(Rights.BA)) docs.addView(button("Consultar BA",false){reportScreen(id)})
             if(has(Rights.EXPORT)) docs.addView(button("Exportar PDFs e fotografias",false){exportIncident(id)})
-            if(has(Rights.SETTINGS) && o.syncState!="SINCRONIZADO") docs.addView(button("Solicitar sincronização",false){SyncJobService.schedule(this);toast("Envio solicitado, se o servidor estiver configurado")})
+            if(has(Rights.SETTINGS) && o.syncState!="SINCRONIZADO") docs.addView(button("Solicitar sincronização",false){scheduleSync();toast("Envio solicitado, se o servidor estiver configurado")})
         }
         val trail=section(body,"Histórico de movimentações")
         if(has(Rights.EXPORT)) trail.addView(button("Gerar histórico PDF",false){
@@ -886,7 +953,7 @@ class MainActivity : Activity() {
                     val completed=store.incident(id) ?: error("Falha ao consultar a ocorrência concluída")
                     TimelinePdf.generate(this,completed,store.auditEvents(id))
                     FileTools.archive(this,completed,store.report(id),store.photos(id),store.auditEvents(id))
-                    SyncJobService.schedule(this)
+                    scheduleSync()
                     toast("BA e ocorrência concluídos localmente. Arquivamento remoto pendente.")
                     openIncident(id)
                 } catch (e: Exception) { toast("Erro ao gerar BA: ${e.message}") }
@@ -894,7 +961,7 @@ class MainActivity : Activity() {
         } else actions.addView(label("Atendimento concluído. As alterações e novas assinaturas estão bloqueadas nesta versão.", 12f))
     }
 
-    private fun saveDraft(r: Report) { store.saveReport(r, currentUser!!.id); SyncJobService.schedule(this) }
+    private fun saveDraft(r: Report) { store.saveReport(r, currentUser!!.id); scheduleSync() }
 
     private fun collectSignature(title: String, target: File, onSaved: (String)->Unit) {
         val holder = vertical().apply {setPadding(sp(12),sp(12),sp(12),sp(12))}
