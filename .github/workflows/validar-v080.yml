@@ -1,4 +1,4 @@
-name: SENTINELA 0.8 - Validacao tecnica
+name: SENTINELA 0.8 - Verificar codigo consolidado
 on:
   push:
     branches: [sentinela-0.8.0-consolidado]
