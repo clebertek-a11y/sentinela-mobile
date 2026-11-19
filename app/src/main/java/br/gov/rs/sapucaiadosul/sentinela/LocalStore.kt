@@ -521,6 +521,20 @@ class LocalStore(ctx: Context) : SQLiteOpenHelper(ctx, "sentinela_offline.db", n
         getString(12), getString(13), getString(14)
     )
 
+    /** Campos conferidos em campo; não altera status, protocolo ou autoria. */
+    fun updateIncidentDetails(id: String, solicitante: String, telefone: String, rua: String,
+        bairro: String, tipo: String, author: String) {
+        require(canOperate(id, author, Rights.BA)) { "Sem autorização para editar este BA" }
+        require(solicitante.isNotBlank() && rua.isNotBlank()) {
+            "Solicitante e endereço são obrigatórios"
+        }
+        writableDatabase.update("incidents",ContentValues().apply {
+            put("solicitante",solicitante.trim());put("telefone",telefone.trim())
+            put("rua",rua.trim());put("bairro",bairro.trim());put("tipo",tipo.trim())
+            put("sync_state","PENDENTE");put("updated_at",now())
+        },"id=?",arrayOf(id))
+    }
+
     fun updateStatus(id: String, status: String, author: String) {
         require(status in setOf("Aguardando atendimento", "Equipe deslocada", "Em atendimento", "Aguardando apoio", "Aguardando retorno", "Atendida"))
         require(canOperate(id,author,Rights.STATUS)) { "Aceite a ocorrência antes de alterar o andamento" }
