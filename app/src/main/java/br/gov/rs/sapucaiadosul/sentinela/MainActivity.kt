@@ -881,32 +881,62 @@ class MainActivity : Activity() {
 
     private fun newIncident() {
         if (!canOpen()) return toast("Somente operador ou administrador abre ocorrências")
-        val body = screen("Nova ocorrência", "Registro local no SIGOPE", ::dashboard)
-        val c = section(body, "Dados iniciais")
+        val body = screen("Nova ocorrência", "O registro será usado no BA, sem redigitação", ::dashboard)
+        val c = section(body, "Dados do solicitante")
         val cat = Spinner(this)
-        val categories = arrayOf("OCORRENCIAS", "VISTORIAS", "APOIOS OPERACIONAIS", "INTERDIÇÕES")
-        cat.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, categories)
-        c.addView(label("Categoria", 13f, true)); c.addView(cat)
-        val solicitante = field(c,"Solicitante")
-        val telefone = field(c,"Telefone")
-        val rua = field(c,"Endereço (rua e número)")
-        val bairro = field(c,"Bairro")
-        val tipo = field(c,"Natureza da ocorrência", "Ex.: Queda de árvore")
-        val descricao = field(c,"Descrição inicial")
-        val equipe = field(c,"Equipe designada", "Ex.: Equipe 01")
-        val prioridade = Spinner(this).apply {
-            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, arrayOf("Normal", "Baixa", "Alta", "Urgente"))
+        cat.adapter=ArrayAdapter(this,android.R.layout.simple_spinner_dropdown_item,
+            arrayOf("OCORRENCIAS","VISTORIAS","APOIOS OPERACIONAIS","INTERDIÇÕES"))
+        c.addView(label("Categoria",13f,true));c.addView(cat)
+        val solicitante=field(c,"Solicitante")
+        val cpf=field(c,"CPF do solicitante")
+        val telefone=field(c,"Telefone")
+        val rua=field(c,"Endereço (rua e número)")
+        val bairro=field(c,"Bairro")
+        val classification=section(body,"Tipo do solicitante e atendimento")
+        val requester=addSelector(classification,"Tipo do solicitante",OccurrenceCatalog.requesterTypes,"")
+        val attendance=addSelector(classification,"Modalidade de atendimento",OccurrenceCatalog.attendanceTypes,"")
+        val nature=section(body,"Tipos de ocorrência")
+        val selected=mutableSetOf<String>()
+        addTypeChooser(nature,selected)
+        val other=field(nature,"Outros (quando não constar na lista)")
+        val initial=section(body,"Informações do acionamento")
+        val descricao=field(initial,"Descrição inicial / relato do solicitante")
+        val equipe=field(initial,"Equipe designada","Ex.: Equipe 01")
+        val servidores=field(initial,"Servidores responsáveis (nome - matrícula, um por linha)")
+        servidores.setSingleLine(false);servidores.minLines=2
+        servidores.setText(currentUser?.let{"${it.name} - ${it.matricula}"}?:"")
+        val prioridade=Spinner(this).apply{
+            adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,
+                arrayOf("Normal","Baixa","Alta","Urgente"))
         }
-        c.addView(label("Prioridade", 13f, true)); c.addView(prioridade)
-        c.addView(button("Registrar ocorrência") {
+        initial.addView(label("Prioridade",13f,true));initial.addView(prioridade)
+        initial.addView(button("Registrar ocorrência") {
             try {
-                val item = store.createIncident(cat.selectedItem.toString(),solicitante.text.toString(),
-                    telefone.text.toString(),rua.text.toString(),bairro.text.toString(),
-                    tipo.text.toString(),descricao.text.toString(),equipe.text.toString(),
-                    prioridade.selectedItem.toString(), currentUser!!.id)
+                val types=selected.toMutableList()
+                if(other.text.toString().isNotBlank())types.add("Outros - "+other.text.toString().trim())
+                if(types.isEmpty())return@button toast("Selecione um tipo de ocorrência")
+                val item=store.createIncident(cat.selectedItem.toString(),
+                    solicitante.text.toString(),telefone.text.toString(),rua.text.toString(),
+                    bairro.text.toString(),types.joinToString("; "),
+                    descricao.text.toString(),equipe.text.toString(),
+                    prioridade.selectedItem.toString(),currentUser!!.id)
+                val servers=JSONArray()
+                servidores.text.toString().lines().filter{it.isNotBlank()}.forEach{line->
+                    val parts=line.split(" - ",limit=2)
+                    servers.put(JSONObject().put("nome",parts[0].trim())
+                        .put("matricula",parts.getOrElse(1){""}.trim()))
+                }
+                store.saveBaMeta(item.id, BAExtra(
+                    solicitanteCpf=cpf.text.toString().trim(),
+                    tipoSolicitante=selectorValue(requester),
+                    tipoAtendimento=selectorValue(attendance),
+                    tiposOcorrencia=JSONArray(types).toString(),
+                    servidores=servers.toString()
+                ), currentUser!!.id)
                 scheduleSync()
-                toast("Ocorrência ${item.number} criada offline"); openIncident(item.id)
-            } catch (e: Exception) { toast(e.message ?: "Erro ao registrar") }
+                toast("Ocorrência registrada no aparelho. O HUB criará a pasta ao receber o registro.")
+                openIncident(item.id)
+            } catch(e:Exception){toast(e.message?:"Erro ao registrar")}
         })
     }
 
