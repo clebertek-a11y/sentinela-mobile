@@ -153,7 +153,17 @@ class HubSyncEngine(private val context: Context) {
             .put("agente_matricula",r.agenteMatricula).put("agente_nome",r.agenteNome)
             .put("outros_agentes",r.outrosAgentes).put("gps",r.gps)
             .put("atualizado_em",r.atualizadoEm)
-        return JSONObject().put("numero_sigope",i.number).put("data",i.date)
+        val extras=store.baMeta(i.id)
+        val extra=JSONObject()
+            .put("solicitante_cpf",extras.solicitanteCpf)
+            .put("tipo_solicitante",extras.tipoSolicitante)
+            .put("tipo_atendimento",extras.tipoAtendimento)
+            .put("responsavel_telefone",extras.responsavelTelefone)
+            .put("responsavel_vinculo",extras.responsavelVinculo)
+            .put("tipos_ocorrencia",extras.tiposOcorrencia)
+            .put("servidores",extras.servidores)
+            .put("endereco_complemento",extras.enderecoComplemento)
+        return JSONObject().put("ba_extra",extra).put("numero_sigope",i.number).put("data",i.date)
             .put("categoria",i.category).put("solicitante",i.solicitante)
             .put("telefone",i.telefone).put("endereco",i.rua).put("bairro",i.bairro)
             .put("tipo",i.tipo).put("descricao",i.descricao).put("equipe",i.equipe)
@@ -188,6 +198,18 @@ class HubSyncEngine(private val context: Context) {
             if (db.update("incidents",cv,"id=?",arrayOf(id)) != 1) error("Erro ao atualizar ocorrencia")
         } else {
             db.insertOrThrow("incidents",null,cv)
+        }
+        data.optJSONObject("ba_extra")?.let { ex ->
+            store.saveBaMeta(id, BAExtra(
+                ex.optString("solicitante_cpf"),
+                ex.optString("tipo_solicitante"),
+                ex.optString("tipo_atendimento"),
+                ex.optString("responsavel_telefone"),
+                ex.optString("responsavel_vinculo"),
+                ex.optString("tipos_ocorrencia","[]"),
+                ex.optString("servidores","[]"),
+                ex.optString("endereco_complemento")
+            ), user, syncedImport=true)
         }
         val report = data.optJSONObject("relatorio")
         if (report != null) {
