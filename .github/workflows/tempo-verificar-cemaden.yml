@@ -1,0 +1,47 @@
+name: TEMPO - Diagnóstico CEMADEN (somente consulta)
+on:
+  push:
+    branches: [tempo-android-piloto-isolado]
+    paths: ['.github/workflows/tempo-verificar-cemaden.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  consultar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Conferir resposta pública da rede pluviométrica CEMADEN
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import urllib.request,json,re,datetime
+          u="https://resources.cemaden.gov.br/dados/311_24.json"
+          req=urllib.request.Request(u,headers={"User-Agent":"Mozilla/5.0 TEMPO/0.3","Accept":"*/*"})
+          try:
+            with urllib.request.urlopen(req,timeout=35) as f:
+              s=f.read(16000000).decode("utf-8-sig","replace")
+              print("HTTP",f.status,"content_type",f.headers.get("content-type"),"bytes",len(s))
+            b=s.strip().rstrip(";")
+            if b and b[0]!="[" and b[0]!="{":
+              m=re.match(r"^[\w$.]+\s*\((.*)\)\s*$",b,re.S)
+              if not m: raise ValueError("JSONP não reconhecido: "+b[:120])
+              b=m.group(1)
+            obj=json.loads(b)
+            print("ROOT_TYPE",type(obj).__name__)
+            if isinstance(obj,list):obj=obj[0]
+            print("ROOT_KEYS",list(obj)[:25])
+            print("UPDATED",obj.get("atualizado"))
+            stations=obj.get("estacao",[])
+            print("TOTAL",len(stations))
+            if stations:
+              print("FIRST_KEYS",list(stations[0]))
+              rs=[x for x in stations if str(x.get("uf","")).upper()=="RS"]
+              print("RS_COUNT",len(rs))
+              matches=[x for x in rs if any(t in str(x.get("cidade","")).lower() for t in ("sapucaia","esteio","são leopoldo","sao leopoldo","canoas","novo hamburgo"))]
+              print("METRO_COUNT",len(matches))
+              for x in matches[:15]: print("STATION",json.dumps(x,ensure_ascii=False)[:1800])
+          except Exception as e:
+            print("CHECK_FAILED",repr(e))
+            raise
+          PY
