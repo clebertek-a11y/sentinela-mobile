@@ -44,19 +44,19 @@ jobs:
         run: |
           test -s tempo/app/build/outputs/apk/debug/app-debug.apk
           mkdir -p downloads
-          cp tempo/app/build/outputs/apk/debug/app-debug.apk downloads/TEMPO-Sapucaia-0.2.1-piloto.apk
-          sha256sum downloads/TEMPO-Sapucaia-0.2.1-piloto.apk
+          cp tempo/app/build/outputs/apk/debug/app-debug.apk downloads/TEMPO-Sapucaia-0.3.0-piloto.apk
+          sha256sum downloads/TEMPO-Sapucaia-0.3.0-piloto.apk
       - name: Disponibilizar APK em artefato do workflow
         uses: actions/upload-artifact@v4
         with:
           name: TEMPO-Sapucaia-Android-APK-030
-          path: downloads/TEMPO-Sapucaia-0.2.1-piloto.apk
+          path: downloads/TEMPO-Sapucaia-0.3.0-piloto.apk
           retention-days: 30
           if-no-files-found: error
       - name: Publicar APK para download direto no ramo isolado
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add downloads/TEMPO-Sapucaia-0.2.1-piloto.apk
+          git add downloads/TEMPO-Sapucaia-0.3.0-piloto.apk
           git commit -m "Publicar APK piloto TEMPO [skip ci]"
           git push origin HEAD:tempo-android-piloto-isolado
