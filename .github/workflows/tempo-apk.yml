@@ -36,6 +36,7 @@ jobs:
           mkdir -p tempo
           unzip -oq tempo-source.zip -d tempo
           python3 tempo_patch_021.py tempo
+          python3 tempo_patch_v030.py
           node --check tempo/app/src/main/assets/app.js
       - name: Compilar APK Debug
         run: gradle --project-dir tempo :app:assembleDebug --no-daemon --stacktrace
@@ -48,7 +49,7 @@ jobs:
       - name: Disponibilizar APK em artefato do workflow
         uses: actions/upload-artifact@v4
         with:
-          name: TEMPO-Sapucaia-Android-APK
+          name: TEMPO-Sapucaia-Android-APK-030
           path: downloads/TEMPO-Sapucaia-0.2.1-piloto.apk
           retention-days: 30
           if-no-files-found: error
