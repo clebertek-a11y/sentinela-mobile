@@ -19,14 +19,17 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Configurar Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Conferir Android SDK preinstalado
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          test -d "$ANDROID_HOME"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --version
       - name: Configurar Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
       - name: Instalar componentes Android API 35
-        run: sdkmanager --install "platforms;android-35" "build-tools;35.0.0"
+        run: "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" --install "platforms;android-35" "build-tools;35.0.0"
       - name: Extrair projeto TEMPO sem Lovable
         run: |
           mkdir -p tempo
