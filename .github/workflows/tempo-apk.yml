@@ -1,0 +1,56 @@
+name: TEMPO Android - APK instalavel
+on:
+  push:
+    branches: [tempo-android-piloto-isolado]
+    paths-ignore:
+      - 'downloads/**'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  compilar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Baixar codigo do ramo isolado TEMPO
+        uses: actions/checkout@v4
+      - name: Configurar JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Configurar Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Configurar Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Instalar componentes Android API 35
+        run: sdkmanager --install "platforms;android-35" "build-tools;35.0.0"
+      - name: Extrair projeto TEMPO sem Lovable
+        run: |
+          mkdir -p tempo
+          unzip -oq tempo-source.zip -d tempo
+          node --check tempo/app/src/main/assets/app.js
+      - name: Compilar APK Debug
+        run: gradle --project-dir tempo :app:assembleDebug --no-daemon --stacktrace
+      - name: Verificar instalador
+        run: |
+          test -s tempo/app/build/outputs/apk/debug/app-debug.apk
+          mkdir -p downloads
+          cp tempo/app/build/outputs/apk/debug/app-debug.apk downloads/TEMPO-Sapucaia-0.2.0-piloto.apk
+          sha256sum downloads/TEMPO-Sapucaia-0.2.0-piloto.apk
+      - name: Disponibilizar APK em artefato do workflow
+        uses: actions/upload-artifact@v4
+        with:
+          name: TEMPO-Sapucaia-Android-APK
+          path: downloads/TEMPO-Sapucaia-0.2.0-piloto.apk
+          retention-days: 30
+          if-no-files-found: error
+      - name: Publicar APK para download direto no ramo isolado
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add downloads/TEMPO-Sapucaia-0.2.0-piloto.apk
+          git commit -m "Publicar APK piloto TEMPO [skip ci]"
+          git push origin HEAD:tempo-android-piloto-isolado

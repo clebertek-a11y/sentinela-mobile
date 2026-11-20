@@ -1,3 +1,1 @@
-# SENTINELA Mobile
-
-Aplicativo Android independente em desenvolvimento. Compilação destinada exclusivamente a testes com dados fictícios. Não utilizar em atendimentos reais até validação e homologação.
+TEMPO Android: ramo isolado para compilacao do aplicativo TEMPO. Nao altera o codigo principal do SENTINELA. O ZIP e o codigo-fonte v0.2.0; o APK aparece em downloads/ apos o workflow completar.
