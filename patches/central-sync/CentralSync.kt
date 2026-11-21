@@ -41,13 +41,20 @@ internal object CentralSync {
 
     fun configure(ctx: Context, base: String, publishableKey: String) {
         val url = URL(base.trim().trimEnd('/'))
-        require(url.protocol == "https" && url.host.isNotBlank() &&
+        require(url.protocol == "https" && url.host.endsWith(".supabase.co") &&
             url.userInfo == null && url.query == null && url.ref == null &&
-            url.port == -1) { "Informe HTTPS válido, sem parâmetros ou senha." }
+            url.port == -1) { "Use o domínio HTTPS oficial do projeto Supabase, sem parâmetros." }
         require(publishableKey.length in 12..512) { "Chave pública inválida." }
         val old = prefs(ctx)
         if (old.getString("base", "") != url.toString() ||
             old.getString("key", "") != publishableKey) {
+            if (old.getString("base", "").orEmpty().isNotBlank()) {
+                CentralCache(ctx).use { db ->
+                    require(db.pending().isEmpty() && db.conflictCount() == 0) {
+                        "Não é possível trocar de projeto com operações pendentes. Preserve os registros e solicite reconciliação."
+                    }
+                }
+            }
             signOut(ctx)
             old.edit().remove("account_uid").apply()
             // Não reutilizar fila/cache de outro projeto Supabase.
@@ -246,6 +253,7 @@ internal object CentralSync {
             val lastFull = db.value("snapshot_at").toLongOrNull() ?: 0
             if (System.currentTimeMillis() - lastFull > RECONCILIAR_MS) {
                 var key: String? = null
+                val seen = mutableSetOf<String>()
                 var completed = false
                 repeat(100) {
                     if (completed) return@repeat
@@ -255,6 +263,7 @@ internal object CentralSync {
                     for (n in 0 until records.length()) {
                         val item = records.getJSONObject(n)
                         val id = item.getString("id")
+                        seen.add(id)
                         if (!db.hasPending(id)) db.upsert(id, item.optInt("mobile_versao"), item)
                     }
                     val next = page.optString("proximo", "")
@@ -262,7 +271,10 @@ internal object CentralSync {
                     if (!completed && (next.isBlank() || next == key)) error("Cursor do snapshot não avançou.")
                     key = next
                 }
-                if (completed) db.putValue("snapshot_at", System.currentTimeMillis().toString())
+                if (completed) {
+                    db.reconcileMissing(seen)
+                    db.putValue("snapshot_at", System.currentTimeMillis().toString())
+                }
             }
             return Summary(db.cases().size, db.pending().size, db.conflictCount(),
                 Instant.now().toString())
@@ -299,6 +311,12 @@ internal class CentralCache(ctx: Context) : SQLiteOpenHelper(ctx,
         buildList { while(c.moveToNext()) add(JSONObject(c.getString(0))) }
     }
     fun remove(id: String) { writableDatabase.delete("casos", "id=?", arrayOf(id)) }
+    fun reconcileMissing(present: Set<String>) {
+        for (obj in cases()) {
+            val id = obj.optString("id")
+            if (id.isNotBlank() && id !in present && !hasPending(id)) remove(id)
+        }
+    }
     fun queue(id: String, type: String, caseId: String, version: Int, data: JSONObject) {
         writableDatabase.execSQL("INSERT INTO fila(id,tipo,ocorrencia_id,base_versao,dados) VALUES(?,?,?,?,?)",
             arrayOf(id, type, caseId, version, data.toString()))
