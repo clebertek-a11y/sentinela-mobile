@@ -49,6 +49,7 @@ internal object CentralSync {
         if (old.getString("base", "") != url.toString() ||
             old.getString("key", "") != publishableKey) {
             signOut(ctx)
+            old.edit().remove("account_uid").apply()
             // Não reutilizar fila/cache de outro projeto Supabase.
             ctx.deleteDatabase("sigade_central_cache.db")
         }
@@ -104,8 +105,12 @@ internal object CentralSync {
         val access = response.getString("access_token")
         val refresh = response.getString("refresh_token")
         val uid = response.getJSONObject("user").getString("id")
+        val owner = prefs(ctx).getString("account_uid", null)
+        require(owner == null || owner == uid) {
+            "Este aparelho contém dados de outra conta central. Não misture filas offline; solicite a migração administrativa."
+        }
         val expires = System.currentTimeMillis() + response.optLong("expires_in", 3600) * 1000L
-        prefs(ctx).edit().putString("session", encrypt(JSONObject()
+        prefs(ctx).edit().putString("account_uid", uid).putString("session", encrypt(JSONObject()
             .put("access", access).put("refresh", refresh)
             .put("user_id", uid).put("expires", expires).toString())).apply()
     }
