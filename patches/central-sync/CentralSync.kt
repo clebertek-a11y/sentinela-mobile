@@ -208,9 +208,9 @@ internal object CentralSync {
                 try {
                     val response = rpc(ctx, "mobile_comando", JSONObject()
                         .put("p_operacao_id", op.id).put("p_tipo", op.type)
-                        .put("p_ocorrencia_id", op.caseId).put("p_base_versao", op.version)
+                        .put("p_ocorrencia_id", op.caseId).put("p_base_versao", if (op.type == "criar") JSONObject.NULL else op.version)
                         .put("p_dados", JSONObject(op.body)))
-                    val updated = response.optJSONObject("registro")
+                    val updated = response.optJSONObject("ocorrencia")
                         ?: error("O servidor não confirmou o registro. A operação seguirá pendente.")
                     db.upsert(op.caseId, updated.optInt("mobile_versao"), updated)
                     db.done(op.id)
