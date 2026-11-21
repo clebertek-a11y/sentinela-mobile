@@ -32,6 +32,7 @@ class CentralActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
     private var performing = false
     private var active = false
+    private var currentScreen = "lista"
     private lateinit var content: LinearLayout
     private val poll = object : Runnable {
         override fun run() {
@@ -111,7 +112,7 @@ class CentralActivity : Activity() {
         return b
     }
 
-    private fun task(work: () -> Unit, after: () -> Unit = { showHome() }) {
+    private fun task(work: () -> Unit, silent: Boolean = false, after: () -> Unit = { showHome() }) {
         if (performing) return
         performing = true
         Thread {
@@ -120,13 +121,14 @@ class CentralActivity : Activity() {
                 performing = false
                 if (isDestroyed || isFinishing) return@runOnUiThread
                 result.onSuccess { after() }.onFailure {
-                    Toast.makeText(this, it.message ?: "Não foi possível sincronizar.", Toast.LENGTH_LONG).show()
+                    if (!silent) Toast.makeText(this, it.message ?: "Não foi possível sincronizar.", Toast.LENGTH_LONG).show()
                 }
             }
         }.start()
     }
 
     private fun showHome() {
+        currentScreen = "lista"
         begin("SIGADE CENTRAL")
         label("Homologação • dados compartilhados somente após sincronização confirmada.")
         label("Atendimentos do SENTINELA local antigo NÃO são enviados automaticamente. Não utilize registros reais antes da homologação.", 13f)
@@ -135,6 +137,10 @@ class CentralActivity : Activity() {
             return
         }
         label("Conectado à fonte central SIGADE. O SERVIDOR02 é o arquivo institucional, não um segundo banco de ocorrências.", 13f)
+        if (active) {
+            handler.removeCallbacks(poll)
+            handler.postDelayed(poll, 20_000L)
+        }
         label("Pendências: " + CentralSync.pendingCount(this) +
             " • Conflitos: " + CentralSync.conflicts(this), 13f, true)
         button("Atualizar e sincronizar agora") { refresh(false) }
@@ -200,6 +206,7 @@ class CentralActivity : Activity() {
     }
 
     private fun createScreen() {
+        currentScreen = "formulario"
         begin("Nova ocorrência — SIGADE")
         label("Você pode registrar sem conexão. O número oficial será atribuído pelo SIGADE ao sincronizar; até lá, o registro é provisório.", 13f)
         val solicitante = input("Solicitante")
@@ -231,9 +238,9 @@ class CentralActivity : Activity() {
 
     private fun refresh(silent: Boolean) {
         if (performing) return
-        task({ CentralSync.synchronize(this) }) {
-            if (!silent) showHome()
-            // Não reconstruir a tela durante digitação.
+        task({ CentralSync.synchronize(this) }, silent) {
+            if (currentScreen == "lista") showHome()
+            // Não reconstruir o formulário durante a digitação.
         }
     }
 }
