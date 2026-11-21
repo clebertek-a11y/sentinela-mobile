@@ -219,7 +219,9 @@ class CentralActivity : Activity() {
                 .put("prioridade", "Normal")
             try {
                 CentralSync.enqueueCreate(this, payload)
-                task({ CentralSync.synchronize(this) })
+                // A fila persistiu: volte à lista antes da rede, para não duplicar no retry.
+                showHome()
+                refresh(true)
             } catch (e: Exception) {
                 Toast.makeText(this, e.message ?: "Verifique os campos.", Toast.LENGTH_LONG).show()
             }
