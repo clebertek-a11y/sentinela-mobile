@@ -69,7 +69,7 @@ class CentralActivity : Activity() {
         content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(26, 28, 26, 70)
-            setBackgroundColor(background)
+            setBackgroundColor(this@CentralActivity.background)
         }
         scroll.addView(content)
         setContentView(scroll)
