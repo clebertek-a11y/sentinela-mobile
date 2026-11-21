@@ -1,0 +1,38 @@
+name: Diagnostico rede CEMADEN Tempo 1.0.1
+on:
+  push:
+    branches: [tempo-diagnostico-cemaden-101]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  checar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Testar rede principal e 4 estacoes pelo HTTPS
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import urllib.request,urllib.error,json,time
+          urls=[
+          'https://resources.cemaden.gov.br/dados/311_24.json',
+          'https://mapservices.cemaden.gov.br/MapaInterativoWS/resources/horario/4331/720',
+          'https://mapservices.cemaden.gov.br/MapaInterativoWS/resources/horario/4329/720',
+          'https://mapservices.cemaden.gov.br/MapaInterativoWS/resources/horario/4330/720',
+          'https://mapservices.cemaden.gov.br/MapaInterativoWS/resources/horario/6238/720'
+          ]
+          for url in urls:
+            for ua in ['TEMPO-Sapucaia-Android/1.0.0','Mozilla/5.0 (Linux; Android 16; Mobile) AppleWebKit/537.36']:
+              t=time.monotonic()
+              try:
+                req=urllib.request.Request(url,headers={'User-Agent':ua,'Accept':'application/json,text/xml,application/xml,*/*'})
+                with urllib.request.urlopen(req,timeout=18) as f:
+                  raw=f.read(6500000).decode('utf-8-sig','replace')
+                  print('ok', url.rsplit('/',2)[-2:],ua[:22],f.status,f.headers.get('content-type'),len(raw),'seconds',round(time.monotonic()-t,2))
+                  j=json.loads(raw)
+                  if isinstance(j,list):
+                    v=j[0];print('list root',len(j),'stations',len(v.get('estacao',[])),'updated',v.get('atualizado'))
+                  else: print('history dates',len(j.get('datas',[])),'station',j.get('estacao',{}).get('nome'))
+              except Exception as e:print('FAIL',url,ua[:22],repr(e),'seconds',round(time.monotonic()-t,2))
+          PY
