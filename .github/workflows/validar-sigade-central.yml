@@ -1,0 +1,56 @@
+name: Homologar Android SIGADE Central (nao publicar)
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/sigade-sync-homologacao
+    paths:
+      - 'patches/central-sync/**'
+      - '.github/workflows/validar-sigade-central.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  homologar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout de homologacao
+        uses: actions/checkout@v4
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Instalar SDK Android
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" --install "platforms;android-35" "build-tools;35.0.0"
+      - name: Preparar codigo do piloto e aplicar patch central
+        run: |
+          set -euo pipefail
+          unzip -oq sentinela_source_payload.zip -d .
+          python3 patches/central-sync/ativar_central.py
+          grep -F 'android:name=".CentralActivity"' app/src/main/AndroidManifest.xml
+          grep -F 'SIGADE CENTRAL' app/src/main/java/br/gov/rs/sapucaiadosul/sentinela/MainActivity.kt
+          grep -F 'br.gov.rs.sapucaiadosul.sentinela.atualizavel.homologacao' app/build.gradle.kts
+      - name: Compilar APK de depuracao
+        run: gradle --no-daemon --stacktrace :app:assembleDebug
+      - name: Verificar identificacao distinta do aplicativo existente
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F "package: name='br.gov.rs.sapucaiadosul.sentinela.atualizavel.homologacao'"
+          sha256sum "$APK"
+      - name: Anexar APK de homologacao sem release nem atualizador
+        uses: actions/upload-artifact@v4
+        with:
+          name: SENTINELA-SIGADE-CENTRAL-HOMOLOGACAO
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 5
+          if-no-files-found: error
