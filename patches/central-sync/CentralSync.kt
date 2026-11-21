@@ -216,7 +216,9 @@ internal object CentralSync {
             }
             val oldCursor = db.value("cursor").toLongOrNull() ?: 0L
             var after = (oldCursor - 100L).coerceAtLeast(0L)
-            repeat(100) {
+            var hasMoreDelta = true
+            for (attempt in 0 until 100) {
+                if (!hasMoreDelta) break
                 val page = rpc(ctx, "mobile_mudancas", JSONObject()
                     .put("p_apos", after).put("p_limite", 100))
                 val arr = page.optJSONArray("itens") ?: JSONArray()
@@ -234,7 +236,7 @@ internal object CentralSync {
                 require(next >= after) { "Cursor de sincronização inválido." }
                 after = next
                 db.putValue("cursor", maxOf(oldCursor, after).toString())
-                if (!page.optBoolean("has_more", false)) return@repeat
+                hasMoreDelta = page.optBoolean("has_more", false)
             }
             val lastFull = db.value("snapshot_at").toLongOrNull() ?: 0
             if (System.currentTimeMillis() - lastFull > RECONCILIAR_MS) {
