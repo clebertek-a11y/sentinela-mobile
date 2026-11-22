@@ -7,7 +7,7 @@ s=h.read_text(encoding="utf-8")
 old='<strong id="river-value">-- m</strong><small id="river-meta">ANA · São Leopoldo · aguardando leitura</small>'
 new='<strong id="river-value">-- m</strong><span id="river-trend" class="river-trend unavailable" aria-live="polite">↔ Tendência indisponível</span><small id="river-meta">ANA · São Leopoldo · aguardando leitura</small>'
 assert s.count(old)==1,"Cartão do Rio dos Sinos inesperado"
-h.write_text(s.replace(old,new),encoding="utf-8")
+h.write_text(s.replace(old,new).replace("Versão 1.0.1","Versão 1.0.2"),encoding="utf-8")
 css=assets/"style.css"
 s=css.read_text(encoding="utf-8")
 s+="""
