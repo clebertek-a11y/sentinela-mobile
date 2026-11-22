@@ -1,0 +1,64 @@
+name: TEMPO Android 1.0.2 - Corrigir CEMADEN JSONP
+on:
+  push:
+    branches: [tempo-android-v1.0.2]
+    paths-ignore:
+      - 'downloads/**'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  compilar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Baixar projeto
+        uses: actions/checkout@v4
+      - name: Configurar Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Android SDK 35
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" --install "platforms;android-35" "build-tools;35.0.0"
+      - name: Aplicar correções ao TEMPO estável
+        run: |
+          mkdir -p tempo
+          unzip -oq tempo-source.zip -d tempo
+          python3 tempo_patch_021.py tempo
+          python3 tempo_patch_v030.py
+          python3 tempo_patch_v101.py
+          python3 tempo_patch_v102.py tempo
+          node --check tempo/app/src/main/assets/app.js
+          grep -q "versionCode 10002" tempo/app/build.gradle
+          grep -q "versionName '1.0.2'" tempo/app/build.gradle
+          grep -q "data.substring(begin, end + 1)" tempo/app/src/main/java/br/com/iantzen/tempo/MonitorBridge.java
+      - name: Compilar Android Release
+        run: gradle --project-dir tempo :app:assembleRelease --no-daemon --stacktrace
+      - name: Alinhar APK para assinatura com chave original (fora do GitHub)
+        run: |
+          set -eu
+          test -s tempo/app/build/outputs/apk/release/app-release-unsigned.apk
+          mkdir -p downloads
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -f -p 4 tempo/app/build/outputs/apk/release/app-release-unsigned.apk downloads/TEMPO-1.0.2-aligned-unsigned.apk
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -v 4 downloads/TEMPO-1.0.2-aligned-unsigned.apk
+          sha256sum downloads/TEMPO-1.0.2-aligned-unsigned.apk
+      - name: Salvar artefato técnico
+        uses: actions/upload-artifact@v4
+        with:
+          name: TEMPO-1.0.2-unsigned-para-assinar
+          path: downloads/TEMPO-1.0.2-aligned-unsigned.apk
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publicar APK sem assinatura para assinatura local
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add downloads/TEMPO-1.0.2-aligned-unsigned.apk
+          git commit -m "TEMPO 1.0.2 artefato para assinatura local [skip ci]"
+          git push origin HEAD:tempo-android-v1.0.2
